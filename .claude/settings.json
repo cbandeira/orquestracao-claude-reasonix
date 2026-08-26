@@ -1,0 +1,30 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "jq -r '\"[\\(.model.display_name)] \\(.workspace.current_dir | split(\"/\") | last) | $\\(.cost.total_cost_usd) | \\(.cost.total_input_tokens + .cost.total_output_tokens) tok\"'"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "notify-send -u normal 'Claude Code' 'Terminou — confira o handoff' 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "notify-send -u critical 'Claude Code' 'Precisa de você' 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

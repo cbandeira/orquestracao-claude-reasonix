@@ -1,0 +1,482 @@
+#!/usr/bin/env bash
+# aif -- cartório do loop manual Claude Code <-> Reasonix.
+#
+# Não roda modelo nenhum. Cuida do git, valida os artefatos que os agentes
+# escrevem e diz qual é o próximo passo. Convenções idênticas às do ai-flow:
+# branch ai/<slug>, worktree ../.ai-flow-worktrees/<slug>, artefatos em .ai/.
+#
+#   aif install <projeto>    copia o pacote para um projeto, sem sobrescrever
+#   aif open "<descrição>"   cria branch + worktree + esqueleto do contrato
+#   aif cd                   imprime o caminho da worktree (use: cd "$(aif cd)")
+#   aif status               o semáforo: onde estamos e qual o próximo passo
+#   aif verify               valida .ai/review.json sem commitar
+#   aif accept               valida e commita o trabalho aprovado
+#   aif drop                 remove a worktree e a branch da tarefa
+#
+# Configuráveis por ambiente:
+#   AIF_BRANCH_PREFIX  (padrão: ai)
+#   AIF_WORKTREE_DIR   (padrão: ../.ai-flow-worktrees)
+#   AIF_COMMIT_PREFIX  (padrão: feat)
+
+set -euo pipefail
+
+BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
+WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
+COMMIT_PREFIX="${AIF_COMMIT_PREFIX:-feat}"
+MAX_SLUG=60
+
+bold=$'\033[1m'; dim=$'\033[2m'; red=$'\033[31m'; grn=$'\033[32m'
+ylw=$'\033[33m'; cyn=$'\033[36m'; rst=$'\033[0m'
+[ -t 1 ] || { bold=""; dim=""; red=""; grn=""; ylw=""; cyn=""; rst=""; }
+
+die() { printf '%saif: %s%s\n' "$red" "$*" "$rst" >&2; exit 1; }
+
+repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || die "não estou dentro de um repositório git"
+}
+
+make_slug() {
+  local s
+  s="$(printf '%s' "$1" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null || printf '%s' "$1")"
+  s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+  s="${s:0:$MAX_SLUG}"
+  s="${s%-}"
+  [ -n "$s" ] || die "descrição não gera um slug válido"
+  printf '%s' "$s"
+}
+
+state_file() { printf '%s/.aif/current.json' "$(repo_root)"; }
+
+read_state() {
+  local f; f="$(state_file)"
+  [ -f "$f" ] || die "nenhuma tarefa ativa. Comece com: aif open \"<descrição>\""
+  SLUG="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["slug"])' "$f")"
+  BRANCH="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["branch"])' "$f")"
+  WORKTREE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["worktree"])' "$f")"
+  DESCRIPTION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["description"])' "$f")"
+  [ -d "$WORKTREE" ] || die "a worktree sumiu: $WORKTREE"
+}
+
+# ---------------------------------------------------------------- validadores
+
+plan_state() {  # ok | missing | invalid:<motivo>
+  local plan="$WORKTREE/.ai/current-task.md"
+  [ -f "$plan" ] || { echo "missing"; return; }
+  python3 - "$plan" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+body = re.sub(r"<[^>\n]{0,80}>", "", text).strip()
+if len(body) < 80:
+    print("invalid:conteúdo insuficiente (mínimo 80 caracteres reais)"); sys.exit()
+missing = [s for s in ("Plan", "Acceptance criteria")
+           if not re.search(rf"^#{{1,3}}\s*{re.escape(s)}\b", text, re.I | re.M)]
+print("invalid:faltam as seções " + ", ".join(missing) if missing else "ok")
+PY
+}
+
+review_state() {  # missing | invalid:<motivo> | approved:<n_low> | changes:<n_bloq>
+  local rev="$WORKTREE/.ai/review.json"
+  [ -f "$rev" ] || { echo "missing"; return; }
+  python3 - "$rev" <<'PY'
+import json, sys
+BLOCKING = {"CRITICAL", "HIGH", "MEDIUM"}
+SEV = BLOCKING | {"LOW"}
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception as e:
+    print(f"invalid:JSON inválido ({e})"); sys.exit()
+if not isinstance(d, dict):
+    print("invalid:a raiz não é um objeto"); sys.exit()
+status = d.get("status")
+if status not in ("approved", "changes_required"):
+    print(f"invalid:status {status!r} (esperado approved ou changes_required)"); sys.exit()
+if not str(d.get("summary", "")).strip():
+    print("invalid:summary vazio"); sys.exit()
+issues = d.get("issues", [])
+if not isinstance(issues, list):
+    print("invalid:issues não é lista"); sys.exit()
+for i, it in enumerate(issues):
+    if not isinstance(it, dict):
+        print(f"invalid:issue {i} não é objeto"); sys.exit()
+    faltam = [k for k in ("severity", "file", "description", "recommendation")
+              if not str(it.get(k, "")).strip()]
+    if faltam:
+        print(f"invalid:issue {i} sem {', '.join(faltam)}"); sys.exit()
+    if it["severity"] not in SEV:
+        print(f"invalid:issue {i} com severity {it['severity']!r}"); sys.exit()
+bloq = [it for it in issues if it["severity"] in BLOCKING]
+low = len(issues) - len(bloq)
+if bloq:
+    # aprovado com bloqueante é contradição: vale o mais seguro.
+    print(f"changes:{len(bloq)}")
+else:
+    print(f"approved:{low}" if status == "approved" else "changes:0")
+PY
+}
+
+has_code_changes() {
+  local n
+  n="$(git -C "$WORKTREE" status --porcelain -- . ':(exclude).ai' | wc -l)"
+  local c
+  c="$(git -C "$WORKTREE" diff --name-only "$(base_branch)...HEAD" -- . ':(exclude).ai' 2>/dev/null | wc -l || echo 0)"
+  [ "$n" -gt 0 ] || [ "$c" -gt 0 ]
+}
+
+base_branch() {
+  local root b
+  root="$(repo_root)"
+  b="$(git -C "$root" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  b="${b#origin/}"
+  if [ -z "$b" ]; then
+    if git -C "$root" show-ref --quiet refs/heads/main; then b=main; else b=master; fi
+  fi
+  printf '%s' "$b"
+}
+
+# -------------------------------------------------------------------- comandos
+
+cmd_install() {
+  local src="" dest=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) src="${2:-}"; [ -n "$src" ] || die "--from exige um caminho"; shift 2 ;;
+      -*)     die "opção desconhecida: $1" ;;
+      *)      [ -z "$dest" ] || die "só um projeto por vez"; dest="$1"; shift ;;
+    esac
+  done
+  [ -n "$dest" ] || die "uso: aif install <caminho/do/projeto> [--from <raiz do pacote>]"
+  [ -d "$dest" ] || die "o destino não existe: $dest"
+  dest="$(cd "$dest" && pwd)"
+
+  # Sem --from, o pacote é o diretório atual. O aif instalado vive em
+  # ~/.local/bin, longe dos arquivos, então $0 não serve de pista.
+  src="${src:-$PWD}"
+  [ -d "$src" ] || die "a origem não existe: $src"
+  src="$(cd "$src" && pwd)"
+  local f
+  for f in .claude/commands/planejar.md .claude/commands/revisar.md \
+           .claude/settings.json .ai/implementer.md REASONIX.md; do
+    [ -f "$src/$f" ] || die "$src não parece a raiz do pacote (falta $f). Use --from."
+  done
+  [ "$src" != "$dest" ] || die "origem e destino são o mesmo diretório"
+
+  git -C "$dest" rev-parse --show-toplevel >/dev/null 2>&1 \
+    || printf '%s! o destino não é um repositório git — o loop precisa de um%s\n\n' "$ylw" "$rst"
+
+  printf '\n%sinstalando em%s %s\n\n' "$bold" "$rst" "$dest"
+  mkdir -p "$dest/.claude/commands" "$dest/.ai"
+
+  # Nada aqui sobrescreve: quem já existe no destino ganha. Um settings.json
+  # do projeto vale mais que o do pacote, e o mesmo vale para um REASONIX.md
+  # que você já ajustou.
+  local kept=0
+  copy_keep() {
+    if [ -e "$dest/$2" ]; then
+      printf '  %s—%s %-32s já existe, mantido\n' "$ylw" "$rst" "$2"
+      kept=$((kept + 1))
+    else
+      cp "$src/$1" "$dest/$2"
+      printf '  %s✓%s %-32s copiado\n' "$grn" "$rst" "$2"
+    fi
+  }
+  copy_keep .claude/commands/planejar.md .claude/commands/planejar.md
+  copy_keep .claude/commands/revisar.md  .claude/commands/revisar.md
+  copy_keep .ai/implementer.md           .ai/implementer.md
+  copy_keep REASONIX.md                  REASONIX.md
+
+  install_settings
+  printf '\n'
+
+  if [ "$kept" -gt 0 ]; then
+    printf '%s%s arquivo(s) já existiam e ficaram como estavam.%s\n' \
+      "$dim" "$kept" "$rst"
+    printf '%sCompare com o pacote se quiser as versões novas:%s\n' "$dim" "$rst"
+    printf '%s  diff -ru "%s" "%s" | less%s\n\n' "$dim" "$src" "$dest" "$rst"
+  fi
+
+  printf '%sFalta você:%s\n\n' "$bold" "$rst"
+  printf '  1. ajustar o comando de testes na última seção de %sREASONIX.md%s\n' "$bold" "$rst"
+  printf '     (roda da raiz, termina sozinho, código de saída confiável)\n'
+  printf '  2. commitar — a worktree só enxerga o que está commitado:\n\n'
+  printf '     cd "%s"\n' "$dest"
+  printf '     git add REASONIX.md .ai .claude && git status --short\n\n'
+}
+
+# Onde a statusline e os hooks do pacote já estão, se é que estão. O Claude Code
+# soma o settings.json com o settings.local.json, então os dois contam como um
+# só: instalar de novo no outro arquivo não sobrescreve nada — duplica, e o
+# hook dispara duas vezes. Por isso a checagem é sobre conteúdo, não sobre
+# arquivo existir.
+settings_scan() {
+  python3 - "$@" <<'PY'
+import json, os, sys
+pkg = json.load(open(sys.argv[1], encoding="utf-8"))
+
+loaded = []
+for p in sys.argv[2:]:
+    if not os.path.exists(p):
+        continue
+    try:
+        d = json.load(open(p, encoding="utf-8"))
+    except Exception:
+        continue                      # inválido: o merge vai reclamar depois
+    if isinstance(d, dict):
+        loaded.append((os.path.basename(p), d))
+
+def key(o): return json.dumps(o, sort_keys=True, ensure_ascii=False)
+
+found, missing = [], []
+if "statusLine" in pkg:
+    hits = [n for n, d in loaded if "statusLine" in d]
+    found += hits or []
+    if not hits: missing.append("statusline")
+for event, blocks in pkg.get("hooks", {}).items():
+    for b in blocks:
+        hits = [n for n, d in loaded
+                if any(key(c) == key(b)
+                       for c in (d.get("hooks") or {}).get(event, []))]
+        found += hits or []
+        if not hits: missing.append(f"hook {event}")
+
+onde = ", ".join(sorted(set(found)))
+if not missing:
+    print("installed:" + onde)
+elif found:
+    print("partial:falta " + ", ".join(sorted(set(missing))) + "; o resto já está em " + onde)
+else:
+    print("absent:")
+PY
+}
+
+# O settings.json é o único arquivo que costuma disputar espaço com algo que já
+# existe, e sobrescrevê-lo apaga as permissões do projeto em silêncio. Então
+# ele não entra na cópia cega: ou não há conflito, ou você decide.
+install_settings() {
+  local pkg="$src/.claude/settings.json"
+  local tgt="$dest/.claude/settings.json"
+  local loc="$dest/.claude/settings.local.json"
+  local label=".claude/settings.json"
+
+  local scan; scan="$(settings_scan "$pkg" "$tgt" "$loc")"
+  if [ "${scan%%:*}" = "installed" ]; then
+    printf '  %s✓%s %-32s já instalado em %s\n' "$grn" "$rst" "$label" "${scan#installed:}"
+    return
+  fi
+
+  if [ ! -e "$tgt" ]; then
+    cp "$pkg" "$tgt"
+    printf '  %s✓%s %-32s copiado\n' "$grn" "$rst" "$label"
+    return
+  fi
+
+  printf '  %s!%s %-32s já existe\n\n' "$ylw" "$rst" "$label"
+  printf '    O projeto tem um settings.json próprio. Copiar por cima apagaria\n'
+  printf '    as permissões dele. Onde entram a statusline e os hooks?\n'
+  [ "${scan%%:*}" = "partial" ] \
+    && printf '    %s(%s)%s\n' "$dim" "${scan#partial:}" "$rst"
+  printf '\n'
+  printf '      %s1%s  .claude/settings.local.json  (não versionado — recomendado)\n' "$bold" "$rst"
+  printf '      %s2%s  .claude/settings.json        (mescla no que já está lá)\n' "$bold" "$rst"
+  printf '      %s3%s  pular                        (resolvo à mão depois)\n\n' "$bold" "$rst"
+  printf '    escolha [1/2/3]: '
+  local a; read -r a
+  local out
+  case "$a" in
+    1|"") out="$loc" ;;
+    2)    out="$tgt" ;;
+    *)    printf '\n  %s—%s statusline e hooks não foram instalados\n' "$ylw" "$rst"; return ;;
+  esac
+
+  local res
+  res="$(merge_settings "$pkg" "$out")" || die "falhou ao mesclar: ${res#ERRO:}"
+  printf '\n  %s✓%s %s: %s\n' "$grn" "$rst" "${out#$dest/}" "${res#OK:}"
+
+  if [ "$out" = "$loc" ]; then
+    grep -qs 'settings\.local\.json' "$dest/.gitignore" 2>/dev/null \
+      || { echo '.claude/settings.local.json' >> "$dest/.gitignore"
+           printf '  %s✓%s .gitignore: settings.local.json ignorado\n' "$grn" "$rst"; }
+  fi
+}
+
+# Mescla só o que falta. Nunca remove chave, nunca troca valor que já existe,
+# e rodar duas vezes não duplica hook.
+merge_settings() {
+  python3 - "$1" "$2" <<'PY'
+import json, os, sys
+src = json.load(open(sys.argv[1], encoding="utf-8"))
+path = sys.argv[2]
+dst = {}
+if os.path.exists(path):
+    try:
+        dst = json.load(open(path, encoding="utf-8"))
+    except Exception as e:
+        print(f"ERRO:{os.path.basename(path)} não é JSON válido ({e})"); sys.exit(1)
+    if not isinstance(dst, dict):
+        print(f"ERRO:{os.path.basename(path)} não tem um objeto na raiz"); sys.exit(1)
+
+notes = []
+if "statusLine" in src:
+    if "statusLine" not in dst:
+        dst["statusLine"] = src["statusLine"]; notes.append("statusline adicionada")
+    elif dst["statusLine"] != src["statusLine"]:
+        notes.append("statusline própria mantida")
+
+def key(o): return json.dumps(o, sort_keys=True, ensure_ascii=False)
+
+src_hooks = src.get("hooks", {})
+if src_hooks:
+    dst_hooks = dst.get("hooks")
+    if not isinstance(dst_hooks, dict):
+        dst_hooks = {}
+    added = []
+    for event, blocks in src_hooks.items():
+        cur = dst_hooks.setdefault(event, [])
+        seen = {key(c) for c in cur}
+        for b in blocks:
+            if key(b) not in seen:
+                cur.append(b); added.append(event)
+    dst["hooks"] = dst_hooks
+    notes.append("hooks " + ", ".join(sorted(set(added))) + " adicionados" if added
+                 else "hooks já presentes")
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(dst, f, ensure_ascii=False, indent=2); f.write("\n")
+print("OK:" + ("; ".join(notes) if notes else "nada a fazer"))
+PY
+}
+
+cmd_open() {
+  [ $# -ge 1 ] && [ -n "${1:-}" ] || die "uso: aif open \"<descrição da tarefa>\""
+  local root; root="$(repo_root)"
+  git -C "$root" rev-parse HEAD >/dev/null 2>&1 \
+    || die "o repositório não tem commits ainda; faça o commit inicial primeiro"
+  if [ -f "$(state_file)" ]; then
+    read_state
+    die "a tarefa '$SLUG' ainda está ativa. Finalize com 'aif accept' ou descarte com 'aif drop'."
+  fi
+  local desc="$1" slug branch base wt
+  slug="$(make_slug "$desc")"
+  branch="$BRANCH_PREFIX/$slug"
+  base="$(base_branch)"
+  wt="$(cd "$root" && mkdir -p "$WORKTREE_DIR" && cd "$WORKTREE_DIR" && pwd)/$slug"
+
+  git -C "$root" show-ref --quiet "refs/heads/$branch" \
+    && die "a branch $branch já existe"
+  git -C "$root" worktree add -b "$branch" "$wt" "$base" >/dev/null
+  mkdir -p "$wt/.ai"
+  [ -f "$root/.ai/decisions.md" ] && cp "$root/.ai/decisions.md" "$wt/.ai/decisions.md" || true
+  [ -f "$root/.ai/implementer.md" ] && cp "$root/.ai/implementer.md" "$wt/.ai/implementer.md" || true
+
+  mkdir -p "$root/.aif"
+  grep -qs '^\.aif/$' "$root/.gitignore" 2>/dev/null || echo '.aif/' >> "$root/.gitignore"
+  python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" <<'PY'
+import json, sys
+f, slug, branch, wt, desc, base = sys.argv[1:7]
+json.dump({"slug": slug, "branch": branch, "worktree": wt,
+           "description": desc, "base_branch": base},
+          open(f, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PY
+  printf '%s✓ tarefa aberta%s\n' "$grn" "$rst"
+  printf '  branch    %s (base: %s)\n' "$branch" "$base"
+  printf '  worktree  %s\n\n' "$wt"
+  printf '%sPróximo passo:%s abra os dois agentes na worktree e planeje.\n\n' "$bold" "$rst"
+  printf '    cd "%s"\n' "$wt"
+  printf '    claude          %s# depois: /planejar %s%s\n' "$dim" "$desc" "$rst"
+}
+
+cmd_cd() { read_state; printf '%s\n' "$WORKTREE"; }
+
+cmd_status() {
+  read_state
+  local p r
+  p="$(plan_state)"; r="$(review_state)"
+  printf '\n%s%s%s  %s\n' "$bold" "$SLUG" "$rst" "$DESCRIPTION"
+  printf '%sbranch %s · worktree %s%s\n\n' "$dim" "$BRANCH" "$WORKTREE" "$rst"
+
+  case "$p" in
+    ok)      printf '  plano        %s✓ válido%s\n' "$grn" "$rst" ;;
+    missing) printf '  plano        %s— ausente%s\n' "$ylw" "$rst" ;;
+    *)       printf '  plano        %s✗ %s%s\n' "$red" "${p#invalid:}" "$rst" ;;
+  esac
+  if has_code_changes; then
+    printf '  implementação %s✓ há mudanças de código%s\n' "$grn" "$rst"
+  else
+    printf '  implementação %s— nada fora de .ai/%s\n' "$ylw" "$rst"
+  fi
+  case "$r" in
+    missing)   printf '  revisão      %s— ausente%s\n' "$ylw" "$rst" ;;
+    approved:*) printf '  revisão      %s✓ aprovada (%s LOW)%s\n' "$grn" "${r#approved:}" "$rst" ;;
+    changes:*) printf '  revisão      %s✗ mudanças exigidas (%s bloqueante(s))%s\n' "$red" "${r#changes:}" "$rst" ;;
+    *)         printf '  revisão      %s✗ %s%s\n' "$red" "${r#invalid:}" "$rst" ;;
+  esac
+
+  printf '\n%s→ próximo passo:%s ' "$bold" "$rst"
+  if [ "$p" != "ok" ]; then
+    printf 'no %sClaude Code%s, dentro da worktree: %s/planejar %s%s\n\n' \
+      "$cyn" "$rst" "$bold" "$DESCRIPTION" "$rst"
+  elif ! has_code_changes; then
+    printf 'no %sReasonix%s: cole o bloco /goal que o Claude Code imprimiu.\n\n' "$cyn" "$rst"
+  elif [ "$r" = "missing" ]; then
+    printf 'no %sClaude Code%s: %s/revisar%s\n\n' "$cyn" "$rst" "$bold" "$rst"
+  else
+    case "$r" in
+      approved:*) printf 'rode %saif accept%s para commitar.\n\n' "$bold" "$rst" ;;
+      changes:*)  printf 'no %sReasonix%s: cole o bloco de correção que o Claude Code imprimiu.\n\n' "$cyn" "$rst" ;;
+      *)          printf 'o %s.ai/review.json%s está inválido; peça ao Claude Code para reescrevê-lo.\n\n' "$bold" "$rst" ;;
+    esac
+  fi
+}
+
+cmd_verify() {
+  read_state
+  local p r; p="$(plan_state)"; r="$(review_state)"
+  [ "$p" = "ok" ] || die "plano inválido: ${p#*:}"
+  case "$r" in
+    missing)    die "não há .ai/review.json — nada a validar" ;;
+    invalid:*)  die "review.json inválido: ${r#invalid:}" ;;
+    changes:*)  printf '%s✗ mudanças exigidas (%s bloqueante(s))%s\n' "$red" "${r#changes:}" "$rst"; return 1 ;;
+    approved:*) printf '%s✓ aprovado (%s observações LOW)%s\n' "$grn" "${r#approved:}" "$rst" ;;
+  esac
+}
+
+cmd_accept() {
+  read_state
+  cmd_verify >/dev/null || die "a revisão não aprovou; nada foi commitado"
+  has_code_changes || die "nada a commitar: nenhum arquivo mudou fora de .ai/"
+  git -C "$WORKTREE" add -A
+  git -C "$WORKTREE" commit -q -m "$COMMIT_PREFIX: $DESCRIPTION"
+  local sha; sha="$(git -C "$WORKTREE" rev-parse --short HEAD)"
+  printf '%s✓ %s commitado em %s%s\n\n' "$grn" "$sha" "$BRANCH" "$rst"
+  printf '  revise o resultado:   git diff %s...%s\n' "$(base_branch)" "$BRANCH"
+  printf '  remova a worktree:    git worktree remove "%s"\n' "$WORKTREE"
+  printf '  (a branch %s fica, para você mesclar quando quiser)\n\n' "$BRANCH"
+  rm -f "$(state_file)"
+}
+
+cmd_drop() {
+  read_state
+  printf 'remover a worktree %s e a branch %s? [s/N] ' "$WORKTREE" "$BRANCH"
+  read -r a; case "$a" in s|S|y|Y) ;; *) echo "cancelado"; return ;; esac
+  git -C "$(repo_root)" worktree remove --force "$WORKTREE"
+  git -C "$(repo_root)" branch -D "$BRANCH" >/dev/null 2>&1 || true
+  rm -f "$(state_file)"
+  printf '%s✓ removidos%s\n' "$grn" "$rst"
+}
+
+case "${1:-status}" in
+  install) shift; cmd_install "$@" ;;
+  open)   shift; cmd_open "$@" ;;
+  cd)     cmd_cd ;;
+  status) cmd_status ;;
+  verify) cmd_verify ;;
+  accept) cmd_accept ;;
+  drop)   cmd_drop ;;
+  -h|--help|help)
+    # Sem sed: o BSD sed do macOS não aceita 'q' no meio de um bloco.
+    n=0
+    while IFS= read -r l; do
+      n=$((n + 1)); [ "$n" -lt 3 ] && continue
+      case "$l" in '#'*) l="${l#\#}"; printf '%s\n' "${l# }" ;; *) break ;; esac
+    done < "$0" ;;
+  *) die "comando desconhecido: $1 (tente: aif --help)" ;;
+esac
