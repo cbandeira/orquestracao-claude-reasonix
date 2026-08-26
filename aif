@@ -12,6 +12,7 @@
 #   aif status               o semáforo: onde estamos e qual o próximo passo
 #   aif verify               valida .ai/review.json sem commitar
 #   aif accept               valida e commita o trabalho aprovado
+#   aif land                 mescla na base, remove a worktree e apaga a branch
 #   aif drop                 remove a worktree e a branch da tarefa
 #
 # Configuráveis por ambiente:
@@ -32,8 +33,22 @@ ylw=$'\033[33m'; cyn=$'\033[36m'; rst=$'\033[0m'
 
 die() { printf '%saif: %s%s\n' "$red" "$*" "$rst" >&2; exit 1; }
 
+# Sempre a worktree principal, mesmo quando chamado de dentro de uma worktree de
+# tarefa: --show-toplevel devolveria a worktree, e o estado (.aif/) mora só no
+# repositório principal. A primeira linha de `worktree list` é sempre a main.
 repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null || die "não estou dentro de um repositório git"
+  git rev-parse --git-dir >/dev/null 2>&1 || die "não estou dentro de um repositório git"
+  local line; line="$(git worktree list --porcelain | head -1)"
+  printf '%s' "${line#worktree }"
+}
+
+# Remover uma worktree debaixo dos próprios pés deixa o shell num diretório que
+# não existe mais. Melhor recusar.
+refuse_if_inside() {
+  case "$PWD/" in
+    "$1"/*) die "você está dentro da worktree que seria removida.
+    Volte para o repositório primeiro:  cd \"$(repo_root)\"" ;;
+  esac
 }
 
 make_slug() {
@@ -55,7 +70,23 @@ read_state() {
   BRANCH="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["branch"])' "$f")"
   WORKTREE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["worktree"])' "$f")"
   DESCRIPTION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["description"])' "$f")"
+  # Estados antigos não têm estes campos; o .get mantém a compatibilidade.
+  BASE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("base_branch") or "")' "$f")"
+  ACCEPTED="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("accepted") or "")' "$f")"
+  [ -n "$BASE" ] || BASE="$(base_branch)"
   [ -d "$WORKTREE" ] || die "a worktree sumiu: $WORKTREE"
+}
+
+# Marca a tarefa como commitada e à espera de integração.
+mark_accepted() {
+  python3 - "$(state_file)" "$1" <<'PY'
+import json, sys
+f, sha = sys.argv[1:3]
+d = json.load(open(f, encoding="utf-8"))
+d["accepted"] = sha
+with open(f, "w", encoding="utf-8") as out:
+    json.dump(d, out, ensure_ascii=False, indent=2)
+PY
 }
 
 # ---------------------------------------------------------------- validadores
@@ -353,6 +384,8 @@ cmd_open() {
     || die "o repositório não tem commits ainda; faça o commit inicial primeiro"
   if [ -f "$(state_file)" ]; then
     read_state
+    [ -n "$ACCEPTED" ] \
+      && die "a tarefa '$SLUG' foi aceita mas não integrada. Integre com 'aif land' ou descarte com 'aif drop'."
     die "a tarefa '$SLUG' ainda está ativa. Finalize com 'aif accept' ou descarte com 'aif drop'."
   fi
   local desc="$1" slug branch base wt
@@ -403,6 +436,15 @@ cmd_status() {
   p="$(plan_state)"; r="$(review_state)"
   printf '\n%s%s%s  %s\n' "$bold" "$SLUG" "$rst" "$DESCRIPTION"
   printf '%sbranch %s · worktree %s%s\n\n' "$dim" "$BRANCH" "$WORKTREE" "$rst"
+
+  if [ -n "$ACCEPTED" ]; then
+    printf '  aceita       %s✓ commitada em %s%s\n' "$grn" "$ACCEPTED" "$rst"
+    printf '  integração   %s— pendente%s\n\n' "$ylw" "$rst"
+    printf '%s→ próximo passo:%s teste a mudança de verdade e rode %saif land%s\n' \
+      "$bold" "$rst" "$bold" "$rst"
+    printf '  %s(mescla em %s, remove a worktree, apaga a branch)%s\n\n' "$dim" "$BASE" "$rst"
+    return
+  fi
 
   case "$p" in
     ok)      printf '  plano        %s✓ válido%s\n' "$grn" "$rst" ;;
@@ -457,18 +499,85 @@ cmd_accept() {
   # O plano e o veredito são efêmeros e por worktree. Commitá-los faz a tarefa
   # seguinte nascer com o plano e o `approved` da anterior — e um review.json
   # de outra tarefa abre este mesmo portão por engano.
-  git -C "$WORKTREE" add -A -- . ':(exclude).ai/current-task.md' ':(exclude).ai/review.json'
+  # Nada de ':(exclude)' aqui: um pathspec de exclusão faz o git tratar esses
+  # caminhos como nomeados à mão e recusar o add inteiro quando eles estão no
+  # .gitignore — que é justamente onde 'aif open' os põe. Adiciona tudo e
+  # tira os dois do índice depois, o que vale nos dois casos.
+  git -C "$WORKTREE" add -A -- .
+  git -C "$WORKTREE" reset -q -- .ai/current-task.md .ai/review.json
   git -C "$WORKTREE" commit -q -m "$COMMIT_PREFIX: $DESCRIPTION"
   local sha; sha="$(git -C "$WORKTREE" rev-parse --short HEAD)"
+  mark_accepted "$sha"
   printf '%s✓ %s commitado em %s%s\n\n' "$grn" "$sha" "$BRANCH" "$rst"
-  printf '  revise o resultado:   git diff %s...%s\n' "$(base_branch)" "$BRANCH"
-  printf '  remova a worktree:    git worktree remove "%s"\n' "$WORKTREE"
-  printf '  (a branch %s fica, para você mesclar quando quiser)\n\n' "$BRANCH"
+
+  printf '%s⚠  aceito não é testado.%s A revisão leu o diff; ela não rodou o código.\n' "$ylw" "$rst"
+  printf '   Antes de integrar, exercite a mudança de verdade — a suíte de testes e\n'
+  printf '   o sistema rodando como roda em produção: mesma configuração, mesmos\n'
+  printf '   dados, mesmos serviços externos. Nada disso foi verificado até aqui.\n\n'
+  printf '     cd "%s"\n' "$WORKTREE"
+  printf '     git diff %s...%s   %s# o que exatamente vai entrar%s\n\n' \
+    "$BASE" "$BRANCH" "$dim" "$rst"
+
+  printf '%sQuando estiver convencido:%s  %saif land%s\n' "$bold" "$rst" "$bold" "$rst"
+  printf '   %smescla %s em %s, remove a worktree e apaga a branch.%s\n' \
+    "$dim" "$BRANCH" "$BASE" "$rst"
+  printf '   %spara descartar em vez de integrar: aif drop%s\n\n' "$dim" "$rst"
+}
+
+cmd_land() {
+  read_state
+  [ -n "$ACCEPTED" ] \
+    || die "a tarefa '$SLUG' ainda não foi aceita. Rode 'aif accept' primeiro."
+  refuse_if_inside "$WORKTREE"
+
+  local root err; root="$(repo_root)"
+  # Não exijo árvore limpa: o próprio 'aif open' deixa o .gitignore sujo, e o
+  # git já recusa checkout e merge que perderiam trabalho local. Deixo ele
+  # julgar e repasso o motivo.
+  [ -e "$root/.git/MERGE_HEAD" ] \
+    && die "há um merge em andamento em $root; conclua ou aborte antes de integrar"
+
+  local cur; cur="$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [ "$cur" != "$BASE" ]; then
+    err="$(git -C "$root" checkout "$BASE" 2>&1)" \
+      || die "não consegui mudar para $BASE no repositório principal:
+
+$err"
+    printf '%s(troquei %s → %s no repositório principal)%s\n' \
+      "$dim" "${cur:-HEAD destacado}" "$BASE" "$rst"
+  fi
+
+  if ! err="$(git -C "$root" merge --no-edit "$BRANCH" 2>&1)"; then
+    # Se conflitou de verdade, desfaz. Se o git recusou antes de mexer em
+    # qualquer coisa (mudanças locais no caminho), não há o que desfazer.
+    git -C "$root" merge --abort >/dev/null 2>&1 || true
+    die "não consegui mesclar $BRANCH em $BASE; nada mudou.
+
+$err
+
+    Se foi conflito, atualize a branch da tarefa primeiro:
+      git -C \"$WORKTREE\" rebase $BASE
+    resolva os conflitos lá e rode 'aif land' de novo."
+  fi
+  local sha; sha="$(git -C "$root" rev-parse --short HEAD)"
+
+  git -C "$root" worktree remove --force "$WORKTREE"
+  git -C "$root" branch -d "$BRANCH" >/dev/null 2>&1 \
+    || printf '%saviso: não consegui apagar %s; apague à mão se quiser%s\n' \
+         "$ylw" "$BRANCH" "$rst"
+  rmdir "$(dirname "$WORKTREE")" 2>/dev/null || true   # se foi a última tarefa
   rm -f "$(state_file)"
+
+  printf '\n%s✓ %s integrado em %s (%s)%s\n' "$grn" "$BRANCH" "$BASE" "$sha" "$rst"
+  printf '  worktree removida · branch apagada\n\n'
+  printf '  publicar:  %sgit push origin %s%s\n\n' "$bold" "$BASE" "$rst"
 }
 
 cmd_drop() {
   read_state
+  refuse_if_inside "$WORKTREE"
+  [ -n "$ACCEPTED" ] && printf '%saviso: esta tarefa foi aceita (%s) e o trabalho será perdido.%s\n' \
+    "$ylw" "$ACCEPTED" "$rst"
   printf 'remover a worktree %s e a branch %s? [s/N] ' "$WORKTREE" "$BRANCH"
   read -r a; case "$a" in s|S|y|Y) ;; *) echo "cancelado"; return ;; esac
   git -C "$(repo_root)" worktree remove --force "$WORKTREE"
@@ -485,6 +594,7 @@ case "${1:-status}" in
   status) cmd_status ;;
   verify) cmd_verify ;;
   accept) cmd_accept ;;
+  land)   cmd_land ;;
   drop)   cmd_drop ;;
   -h|--help|help)
     # Sem sed: o BSD sed do macOS não aceita 'q' no meio de um bloco.
