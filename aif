@@ -368,7 +368,10 @@ cmd_open() {
   [ -f "$root/.ai/implementer.md" ] && cp "$root/.ai/implementer.md" "$wt/.ai/implementer.md" || true
 
   mkdir -p "$root/.aif"
-  grep -qs '^\.aif/$' "$root/.gitignore" 2>/dev/null || echo '.aif/' >> "$root/.gitignore"
+  local ign
+  for ign in ".aif/" ".ai/current-task.md" ".ai/review.json"; do
+    grep -qsxF "$ign" "$root/.gitignore" 2>/dev/null || echo "$ign" >> "$root/.gitignore"
+  done
   python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" <<'PY'
 import json, sys
 f, slug, branch, wt, desc, base = sys.argv[1:7]
@@ -443,7 +446,10 @@ cmd_accept() {
   read_state
   cmd_verify >/dev/null || die "a revisão não aprovou; nada foi commitado"
   has_code_changes || die "nada a commitar: nenhum arquivo mudou fora de .ai/"
-  git -C "$WORKTREE" add -A
+  # O plano e o veredito são efêmeros e por worktree. Commitá-los faz a tarefa
+  # seguinte nascer com o plano e o `approved` da anterior — e um review.json
+  # de outra tarefa abre este mesmo portão por engano.
+  git -C "$WORKTREE" add -A -- . ':(exclude).ai/current-task.md' ':(exclude).ai/review.json'
   git -C "$WORKTREE" commit -q -m "$COMMIT_PREFIX: $DESCRIPTION"
   local sha; sha="$(git -C "$WORKTREE" rev-parse --short HEAD)"
   printf '%s✓ %s commitado em %s%s\n\n' "$grn" "$sha" "$BRANCH" "$rst"
