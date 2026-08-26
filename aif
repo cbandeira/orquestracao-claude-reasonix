@@ -410,7 +410,7 @@ cmd_open() {
 
   mkdir -p "$root/.aif"
   local ign
-  for ign in ".aif/" ".ai/current-task.md" ".ai/review.json"; do
+  for ign in ".aif/" ".ai/current-task.md" ".ai/review.json" ".reasonix/"; do
     grep -qsxF "$ign" "$root/.gitignore" 2>/dev/null || echo "$ign" >> "$root/.gitignore"
   done
   python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" <<'PY'
@@ -498,13 +498,15 @@ cmd_accept() {
   has_code_changes || die "nada a commitar: nenhum arquivo mudou fora de .ai/"
   # O plano e o veredito são efêmeros e por worktree. Commitá-los faz a tarefa
   # seguinte nascer com o plano e o `approved` da anterior — e um review.json
-  # de outra tarefa abre este mesmo portão por engano.
+  # de outra tarefa abre este mesmo portão por engano. O .reasonix/ é estado
+  # local do app do worker (títulos de tópico, timestamps): não pertence ao
+  # histórico do projeto, e o worker o escreve dentro da worktree.
   # Nada de ':(exclude)' aqui: um pathspec de exclusão faz o git tratar esses
   # caminhos como nomeados à mão e recusar o add inteiro quando eles estão no
   # .gitignore — que é justamente onde 'aif open' os põe. Adiciona tudo e
-  # tira os dois do índice depois, o que vale nos dois casos.
+  # tira os três do índice depois, o que vale nos dois casos.
   git -C "$WORKTREE" add -A -- .
-  git -C "$WORKTREE" reset -q -- .ai/current-task.md .ai/review.json
+  git -C "$WORKTREE" reset -q -- .ai/current-task.md .ai/review.json .reasonix
   git -C "$WORKTREE" commit -q -m "$COMMIT_PREFIX: $DESCRIPTION"
   local sha; sha="$(git -C "$WORKTREE" rev-parse --short HEAD)"
   mark_accepted "$sha"

@@ -209,7 +209,10 @@ O `aif` revalida o `review.json` do zero — schema, campos obrigatórios,
 severidades — e aplica a regra que o `ai-flow` já aplicava: **um veredito
 `approved` que lista uma questão bloqueante vale como `changes_required`**.
 Só depois disso ele commita, na branch da tarefa. Sem push, sem merge, sem
-tocar na base.
+tocar na base. Ficam de fora do commit o `.ai/current-task.md`, o
+`.ai/review.json` e o `.reasonix/`: plano, veredito e estado local do app do
+worker são efêmeros e por worktree — commitá-los faz a tarefa seguinte nascer
+com o plano e o `approved` da anterior.
 
 Por que não deixar o Claude Code commitar sozinho? Porque foi ele que escreveu
 o veredito. Um portão que o próprio revisado abre não é um portão — é
