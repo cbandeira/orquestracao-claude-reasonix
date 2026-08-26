@@ -120,9 +120,22 @@ aif open "Adicionar rate limiting no endpoint de login"
 ```
 
 Isso cria a branch `ai/adicionar-rate-limiting-no-endpoint-de-login`, a worktree
-em `../.ai-flow-worktrees/<slug>/`, e imprime o caminho. Mesma convenção do
-`ai-flow` — os dois convivem sem brigar, desde que você não tenha tarefa ativa
-nos dois ao mesmo tempo.
+em `../.ai-flow-worktrees/<projeto>/<slug>/`, e imprime o caminho. Mesma
+convenção de branch do `ai-flow` — os dois convivem sem brigar, desde que você
+não tenha tarefa ativa nos dois ao mesmo tempo.
+
+O `<projeto>` no meio do caminho não é enfeite. O diretório fica **fora** do
+repositório, porque uma worktree dentro dele é uma segunda cópia do projeto
+dentro de si mesmo, e tudo que varre a árvore passa a varrer as duas — um
+`eslint .`, o contexto de um `docker build`, um script que inventaria
+dependências. Mas ficar fora significa que projetos irmãos, sob o mesmo
+diretório-pai, dividem o mesmo `.ai-flow-worktrees/`. Sem o nome do projeto no
+caminho, duas tarefas com a mesma descrição em repositórios diferentes disputam
+o mesmo diretório — e o `git worktree add` falha *depois* de criar a branch,
+deixando uma branch órfã que faz a tentativa seguinte reclamar da coisa errada.
+
+Se preferir outro lugar, `AIF_WORKTREE_DIR` aceita qualquer caminho, relativo à
+raiz do repositório ou absoluto.
 
 ```bash
 cd "$(aif cd)"

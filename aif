@@ -3,7 +3,8 @@
 #
 # Não roda modelo nenhum. Cuida do git, valida os artefatos que os agentes
 # escrevem e diz qual é o próximo passo. Convenções idênticas às do ai-flow:
-# branch ai/<slug>, worktree ../.ai-flow-worktrees/<slug>, artefatos em .ai/.
+# branch ai/<slug>, worktree ../.ai-flow-worktrees/<projeto>/<slug>, artefatos
+# em .ai/.
 #
 #   aif install <projeto>    copia o pacote para um projeto, sem sobrescrever
 #   aif open "<descrição>"   cria branch + worktree + esqueleto do contrato
@@ -358,10 +359,17 @@ cmd_open() {
   slug="$(make_slug "$desc")"
   branch="$BRANCH_PREFIX/$slug"
   base="$(base_branch)"
-  wt="$(cd "$root" && mkdir -p "$WORKTREE_DIR" && cd "$WORKTREE_DIR" && pwd)/$slug"
+  # Namespace por projeto. Sem ele, todo repositório que divide o mesmo
+  # diretório-pai divide também o .ai-flow-worktrees/, e duas tarefas com a
+  # mesma descrição em projetos irmãos disputam o mesmo caminho.
+  local proj; proj="$(basename "$root")"
+  wt="$(cd "$root" && mkdir -p "$WORKTREE_DIR/$proj" && cd "$WORKTREE_DIR/$proj" && pwd)/$slug"
 
   git -C "$root" show-ref --quiet "refs/heads/$branch" \
     && die "a branch $branch já existe"
+  # git worktree add cria a branch e só depois tropeça num caminho ocupado,
+  # deixando uma branch órfã para trás. Melhor descobrir antes.
+  [ -e "$wt" ] && die "já existe algo em $wt — remova ou use outra descrição"
   git -C "$root" worktree add -b "$branch" "$wt" "$base" >/dev/null
   mkdir -p "$wt/.ai"
   [ -f "$root/.ai/decisions.md" ] && cp "$root/.ai/decisions.md" "$wt/.ai/decisions.md" || true
@@ -465,6 +473,7 @@ cmd_drop() {
   read -r a; case "$a" in s|S|y|Y) ;; *) echo "cancelado"; return ;; esac
   git -C "$(repo_root)" worktree remove --force "$WORKTREE"
   git -C "$(repo_root)" branch -D "$BRANCH" >/dev/null 2>&1 || true
+  rmdir "$(dirname "$WORKTREE")" 2>/dev/null || true   # se foi a última tarefa
   rm -f "$(state_file)"
   printf '%s✓ removidos%s\n' "$grn" "$rst"
 }
