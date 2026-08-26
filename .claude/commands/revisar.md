@@ -120,9 +120,11 @@ Imprima — e nada além disso:
 APROVADO — <resumo em uma frase>
 <n> observações LOW registradas, não bloqueantes.
 
-Pode commitar. Rode você mesmo, na raiz do repositório:
+Pode commitar. Rode você mesmo, daqui mesmo:
 
     aif accept
+
+Depois teste a mudança de verdade e integre com `aif land`.
 ────────────────────────────────────────────────────────────
 ```
 

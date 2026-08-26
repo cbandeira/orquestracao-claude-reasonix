@@ -16,6 +16,7 @@ tudo que for `CRITICAL`, `HIGH` ou `MEDIUM` antes de qualquer trabalho novo.
 ## Não faça, nunca
 
 - `git commit`, `git push`, `git merge`, `git rebase`, `git reset`
+- qualquer comando `aif` — `accept` commita e `land` mescla; são do usuário
 - alterar arquivos fora desta worktree
 - editar `.ai/review.json`
 - alterar arquivos fora da seção `Files` do plano

@@ -9,9 +9,10 @@ executa um contrato e reporta.
 
 ## Regras rígidas
 
-1. **Nunca rode `git commit`, `git push`, `git merge`, `git rebase` ou
-   `git reset`.** O controle de versão é do usuário. Deixe suas mudanças na
-   árvore de trabalho.
+1. **Nunca rode `git commit`, `git push`, `git merge`, `git rebase`, `git reset`
+   nem qualquer comando `aif`.** O controle de versão é do usuário — e `aif
+   accept` e `aif land` commitam e mesclam. Deixe suas mudanças na árvore de
+   trabalho.
 2. Nunca altere arquivos fora do diretório de trabalho atual.
 3. Nunca edite `.ai/review.json` — ele pertence ao revisor.
 4. Respeite todas as restrições listadas na seção `Constraints` do plano.

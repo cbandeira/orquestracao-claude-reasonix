@@ -2,7 +2,8 @@
 
 O `ai-flow` continua existindo e continua funcionando. O que muda aqui é quem
 dirige: os modelos rodam nas GUIs, na sua frente, e o `aif` faz o papel de
-cartório — git, validação e commit. Nada roda escondido em `subprocess`.
+cartório — git, validação, commit e integração. Nada roda escondido em
+`subprocess`.
 
 ---
 
@@ -10,7 +11,7 @@ cartório — git, validação e commit. Nada roda escondido em `subprocess`.
 
 | Arquivo | Onde vai | Para que serve |
 |---|---|---|
-| `aif` | `~/.local/bin/aif` | o cartório: worktree, semáforo, validação, commit |
+| `aif` | `~/.local/bin/aif` | o cartório: worktree, semáforo, validação, commit, merge |
 | `.claude/commands/planejar.md` | raiz do projeto | slash command `/planejar` |
 | `.claude/commands/revisar.md` | raiz do projeto | slash command `/revisar` |
 | `.claude/settings.json` | raiz do projeto | statusline com tokens + notificações — **mesclar, não sobrescrever** |
@@ -113,11 +114,14 @@ Aí o alt-tab volta, mas as notificações do passo 8 avisam quando é a hora.
 
 ## 4. Abrindo uma tarefa
 
-Na raiz do repositório (não na worktree):
-
 ```bash
 aif open "Adicionar rate limiting no endpoint de login"
 ```
+
+Os comandos do `aif` funcionam de qualquer lugar do repositório, **inclusive de
+dentro da worktree da tarefa** — ele sempre resolve a worktree principal, que é
+onde o estado mora. As duas exceções são `land` e `drop`, que recusam rodar de
+dentro da worktree que iriam remover.
 
 Isso cria a branch `ai/adicionar-rate-limiting-no-endpoint-de-login`, a worktree
 em `../.ai-flow-worktrees/<projeto>/<slug>/`, e imprime o caminho. Mesma
@@ -211,12 +215,49 @@ Por que não deixar o Claude Code commitar sozinho? Porque foi ele que escreveu
 o veredito. Um portão que o próprio revisado abre não é um portão — é
 decoração. `aif accept` é uma tecla; a independência vale a tecla.
 
-Depois:
+## 9. Testar (você, de verdade)
+
+`accept` não é `testado`. A revisão **leu o diff**; ela não rodou o código, não
+subiu o serviço, não tocou no banco. Tudo que o portão garante é que um segundo
+modelo olhou a mudança e não achou nada bloqueante — o que não é pouco, mas
+também não é execução.
+
+A worktree continua de pé justamente para isto. Vá até ela e exercite a
+mudança como ela vai rodar em produção: mesma configuração, mesmos dados,
+mesmos serviços externos.
 
 ```bash
-git diff main...ai/<slug>       # confira você mesmo
-git worktree remove "<caminho>" # limpa quando terminar
+cd "$(aif cd)"
+git diff main...ai/<slug>   # o que exatamente vai entrar
+<a suíte de testes do projeto>
+<o sistema rodando de verdade>
 ```
+
+## 10. Integrar (você)
+
+```bash
+aif land
+```
+
+Um comando, três coisas: mescla a branch da tarefa na base, remove a worktree e
+apaga a branch. Rode da raiz do repositório — o `aif` recusa se você estiver
+*dentro* da worktree que sumiria debaixo dos seus pés.
+
+Ele não exige árvore limpa: o git já recusa sozinho um `checkout` ou um `merge`
+que atropelaria trabalho local. Se der conflito, o `land` **desfaz o merge e
+não muda nada**, mostrando o motivo e sugerindo o rebase:
+
+```bash
+git -C "$(aif cd)" rebase main   # resolva os conflitos lá
+aif land                         # e tente de novo
+```
+
+Nada disso empurra para o `origin`. O `land` termina imprimindo o `git push`
+sugerido e para ali — a última porta antes do código sair da sua máquina
+continua sendo sua.
+
+Se em vez de integrar você quiser jogar fora, `aif drop` remove worktree e
+branch (com aviso, se a tarefa já tinha sido aceita).
 
 ---
 
@@ -257,8 +298,13 @@ aif status
 | mudanças de código, sem revisão | Claude Code: `/revisar` |
 | revisão exige mudanças | Reasonix: cole o bloco de correção |
 | revisão aprovada | `aif accept` |
+| aceita, integração pendente | teste de verdade, depois `aif land` |
 
-Comandos completos: `install`, `open`, `cd`, `status`, `verify`, `accept`, `drop`.
+Comandos completos: `install`, `open`, `cd`, `status`, `verify`, `accept`,
+`land`, `drop`.
+
+Enquanto houver uma tarefa aceita e não integrada, o `aif open` recusa abrir
+outra — feche o ciclo com `land` ou `drop` primeiro.
 
 ---
 
