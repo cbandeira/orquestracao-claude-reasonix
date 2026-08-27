@@ -83,6 +83,19 @@ O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
 | `.ai/implementer.md` | contrato permanente do worker |
 | `REASONIX.md` | o que o Reasonix carrega ao abrir a worktree |
 | `.claude/settings.json` | statusline e notificações (Claude Code) |
+| `CHANGELOG.md` | o que mudou em cada versão do pacote |
+
+## Versão
+
+O pacote inteiro — script, prompts e contratos — tem um número só, porque as
+peças evoluem juntas.
+
+```bash
+aif version
+```
+
+[CHANGELOG.md](CHANGELOG.md) diz o que mudou em cada uma e quando reinstalar o
+pacote nos projetos que já usam o loop.
 
 ## Documentação
 

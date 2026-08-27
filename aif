@@ -17,6 +17,7 @@
 #   aif accept               valida e commita o trabalho aprovado
 #   aif land                 mescla na base, remove a worktree e apaga a branch
 #   aif drop                 remove a worktree e a branch da tarefa
+#   aif version              imprime a versão deste script
 #
 # Configuráveis por ambiente:
 #   AIF_BRANCH_PREFIX  (padrão: ai)
@@ -25,6 +26,13 @@
 #   AIF_ORCHESTRATOR   (padrão: claude — ou opencode)
 
 set -euo pipefail
+
+# Versão do pacote inteiro (script + prompts + settings), não só do aif:
+# eles evoluem juntos e um contrato novo costuma exigir validação nova.
+# Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
+# MINOR acrescenta comando ou campo, PATCH corrige comportamento.
+# O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
+AIF_VERSION="1.0.0"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
@@ -218,7 +226,8 @@ cmd_install() {
   git -C "$dest" rev-parse --show-toplevel >/dev/null 2>&1 \
     || printf '%s! o destino não é um repositório git — o loop precisa de um%s\n\n' "$ylw" "$rst"
 
-  printf '\n%sinstalando em%s %s\n\n' "$bold" "$rst" "$dest"
+  printf '\n%sinstalando em%s %s %s(aif %s)%s\n\n' \
+    "$bold" "$rst" "$dest" "$dim" "$AIF_VERSION" "$rst"
   mkdir -p "$dest/.claude/commands" "$dest/.ai" \
            "$dest/.opencode/commands" "$dest/.opencode/agents"
 
@@ -700,7 +709,9 @@ case "${1:-status}" in
   accept) cmd_accept ;;
   land)   cmd_land ;;
   drop)   cmd_drop ;;
+  version|--version|-V) printf 'aif %s\n' "$AIF_VERSION" ;;
   -h|--help|help)
+    printf '%saif %s%s\n\n' "$bold" "$AIF_VERSION" "$rst"
     # Sem sed: o BSD sed do macOS não aceita 'q' no meio de um bloco.
     n=0
     while IFS= read -r l; do
