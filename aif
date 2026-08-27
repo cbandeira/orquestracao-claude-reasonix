@@ -437,6 +437,40 @@ print("OK:" + ("; ".join(notes) if notes else "nada a fazer"))
 PY
 }
 
+# O 'git worktree add' materializa a branch base, então a worktree recebe só o
+# que está commitado nela. Arquivo do pacote que ficou de fora simplesmente não
+# existe lá dentro, e o sintoma aparece longe da causa: o orquestrador abre e
+# não encontra o /planejar. Aviso antes de criar, porque depois o conserto é
+# refazer a tarefa.
+#
+# O .ai/implementer.md e o .ai/decisions.md não entram na checagem: esses o
+# 'open' copia à mão para dentro da worktree logo abaixo, e por isso sobrevivem
+# sem commit.
+warn_uncommitted_package() {
+  local root="$1" base="$2" p faltando=""
+  for p in .claude/commands .opencode REASONIX.md; do
+    [ -e "$root/$p" ] || continue
+    if [ -z "$(git -C "$root" ls-tree -r --name-only "$base" -- "$p" 2>/dev/null)" ]; then
+      faltando="$faltando
+    $p — não está commitado em $base"
+    elif [ -n "$(git -C "$root" status --porcelain -- "$p" 2>/dev/null)" ]; then
+      faltando="$faltando
+    $p — tem alterações não commitadas"
+    fi
+  done
+  [ -n "$faltando" ] || return 0
+
+  printf '\n%s!  a worktree vai nascer sem isto:%s%s\n\n' "$ylw" "$rst" "$faltando"
+  printf '   A worktree é um checkout de %s: o que não está commitado lá não\n' "$base"
+  printf '   aparece dentro dela, e o orquestrador abre sem os comandos.\n\n'
+  printf '   Cancele com Ctrl-C, commite, e rode o open de novo:\n\n'
+  printf '     %sgit -C "%s" add .claude .opencode REASONIX.md && git -C "%s" commit%s\n\n' \
+    "$bold" "$root" "$root" "$rst"
+  printf '   continuar assim mesmo? [s/N] '
+  local a; read -r a
+  case "$a" in s|S|y|Y) printf '\n' ;; *) die "cancelado; nada foi criado" ;; esac
+}
+
 cmd_open() {
   [ $# -ge 1 ] && [ -n "${1:-}" ] || die "uso: aif open \"<descrição da tarefa>\""
   local root; root="$(repo_root)"
@@ -463,6 +497,7 @@ cmd_open() {
   # git worktree add cria a branch e só depois tropeça num caminho ocupado,
   # deixando uma branch órfã para trás. Melhor descobrir antes.
   [ -e "$wt" ] && die "já existe algo em $wt — remova ou use outra descrição"
+  warn_uncommitted_package "$root" "$base"
   git -C "$root" worktree add -b "$branch" "$wt" "$base" >/dev/null
   mkdir -p "$wt/.ai"
   [ -f "$root/.ai/decisions.md" ] && cp "$root/.ai/decisions.md" "$wt/.ai/decisions.md" || true

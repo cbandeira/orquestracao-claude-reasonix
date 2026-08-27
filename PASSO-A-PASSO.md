@@ -135,6 +135,13 @@ mudou — o `install` não faz isso sozinho, mas a sua mesclagem manual pode ter
 feito. Desfaça com `git checkout HEAD -- <arquivo>` se não for o que você
 queria.
 
+Se você esquecer, o `aif open` avisa antes de criar a worktree e pergunta se
+quer seguir assim mesmo. Ele lista o que ficou de fora e distingue os dois
+casos — arquivo nunca commitado e arquivo commitado com alteração pendente.
+Vale prestar atenção nesse aviso: o sintoma aparece longe da causa. A worktree
+nasce sem os comandos, e o que você vê é o orquestrador abrindo sem encontrar
+o `/planejar`, sem nada apontando para o commit que faltou.
+
 Se o projeto já tem `.ai/decisions.md` do `ai-flow`, ele é aproveitado: o `aif`
 copia esse arquivo para dentro de cada worktree, e os três papéis o leem.
 
