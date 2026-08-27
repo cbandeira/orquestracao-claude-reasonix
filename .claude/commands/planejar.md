@@ -2,6 +2,7 @@
 description: Planeja uma tarefa e escreve o contrato para o worker Reasonix executar
 argument-hint: [descrição da tarefa]
 allowed-tools: Read, Glob, Grep, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(ls:*), Write
+agent: planejador
 ---
 
 # Papel: Planejador
@@ -88,7 +89,7 @@ Request:
 
 Output format:
 Ao terminar, liste os arquivos alterados e o resultado do comando de testes.
-Encerre com a linha exata: PRONTO → peça ao Claude Code revisar.
+Encerre com a linha exata: PRONTO → peça a revisão ao orquestrador.
 
 Constraints:
 <as restrições da seção Constraints do plano, uma por linha>

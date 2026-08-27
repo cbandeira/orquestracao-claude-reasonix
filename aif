@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# aif -- cartório do loop manual Claude Code <-> Reasonix.
+# aif -- cartório do loop manual orquestrador <-> Reasonix.
 #
 # Não roda modelo nenhum. Cuida do git, valida os artefatos que os agentes
 # escrevem e diz qual é o próximo passo. Convenções idênticas às do ai-flow:
 # branch ai/<slug>, worktree ../.ai-flow-worktrees/<projeto>/<slug>, artefatos
 # em .ai/.
+#
+# O orquestrador (quem planeja e revisa) pode ser o Claude Code ou o OpenCode:
+# os dois leem o mesmo prompt, cada um do seu diretório. Veja AIF_ORCHESTRATOR.
 #
 #   aif install <projeto>    copia o pacote para um projeto, sem sobrescrever
 #   aif open "<descrição>"   cria branch + worktree + esqueleto do contrato
@@ -19,6 +22,7 @@
 #   AIF_BRANCH_PREFIX  (padrão: ai)
 #   AIF_WORKTREE_DIR   (padrão: ../.ai-flow-worktrees)
 #   AIF_COMMIT_PREFIX  (padrão: feat)
+#   AIF_ORCHESTRATOR   (padrão: claude — ou opencode)
 
 set -euo pipefail
 
@@ -26,6 +30,15 @@ BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
 COMMIT_PREFIX="${AIF_COMMIT_PREFIX:-feat}"
 MAX_SLUG=60
+
+# Só muda o que o aif imprime: qual GUI ele manda você abrir e com que nome a
+# chama. Nada da validação depende disso — os dois orquestradores escrevem os
+# mesmos .ai/current-task.md e .ai/review.json.
+case "${AIF_ORCHESTRATOR:-claude}" in
+  claude)   ORCH_NAME="Claude Code"; ORCH_CMD="claude" ;;
+  opencode) ORCH_NAME="OpenCode";    ORCH_CMD="opencode" ;;
+  *)        ORCH_NAME="${AIF_ORCHESTRATOR}"; ORCH_CMD="${AIF_ORCHESTRATOR}" ;;
+esac
 
 bold=$'\033[1m'; dim=$'\033[2m'; red=$'\033[31m'; grn=$'\033[32m'
 ylw=$'\033[33m'; cyn=$'\033[36m'; rst=$'\033[0m'
@@ -51,12 +64,20 @@ refuse_if_inside() {
   esac
 }
 
+# Em python3, e não no pipeline iconv+sed de antes, porque aquele dava slugs
+# diferentes conforme o locale e conforme a implementação do iconv — o do macOS
+# não é o do glibc. Com LC_ALL=C, "Ação" virava "a-o" em vez de "acao", e o
+# nome da branch passava a depender do ambiente de quem rodou. O python3 já é
+# dependência do resto do script e normaliza igual nos dois sistemas.
 make_slug() {
   local s
-  s="$(printf '%s' "$1" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null || printf '%s' "$1")"
-  s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
-  s="${s:0:$MAX_SLUG}"
-  s="${s%-}"
+  s="$(python3 - "$1" "$MAX_SLUG" <<'PY'
+import re, sys, unicodedata
+text, limit = sys.argv[1], int(sys.argv[2])
+plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+print(re.sub(r"[^a-z0-9]+", "-", plain.lower()).strip("-")[:limit].rstrip("-"))
+PY
+)"
   [ -n "$s" ] || die "descrição não gera um slug válido"
   printf '%s' "$s"
 }
@@ -187,7 +208,9 @@ cmd_install() {
   src="$(cd "$src" && pwd)"
   local f
   for f in .claude/commands/planejar.md .claude/commands/revisar.md \
-           .claude/settings.json .ai/implementer.md REASONIX.md; do
+           .claude/settings.json .ai/implementer.md REASONIX.md \
+           .opencode/agents/planejador.md .opencode/agents/revisor.md \
+           .opencode/commands/planejar.md .opencode/commands/revisar.md; do
     [ -f "$src/$f" ] || die "$src não parece a raiz do pacote (falta $f). Use --from."
   done
   [ "$src" != "$dest" ] || die "origem e destino são o mesmo diretório"
@@ -196,7 +219,8 @@ cmd_install() {
     || printf '%s! o destino não é um repositório git — o loop precisa de um%s\n\n' "$ylw" "$rst"
 
   printf '\n%sinstalando em%s %s\n\n' "$bold" "$rst" "$dest"
-  mkdir -p "$dest/.claude/commands" "$dest/.ai"
+  mkdir -p "$dest/.claude/commands" "$dest/.ai" \
+           "$dest/.opencode/commands" "$dest/.opencode/agents"
 
   # Nada aqui sobrescreve: quem já existe no destino ganha. Um settings.json
   # do projeto vale mais que o do pacote, e o mesmo vale para um REASONIX.md
@@ -211,10 +235,42 @@ cmd_install() {
       printf '  %s✓%s %-32s copiado\n' "$grn" "$rst" "$2"
     fi
   }
+  # O prompt de cada papel é um arquivo só, em .claude/commands/, e o OpenCode
+  # o alcança por symlink relativo. Os dois leem diretórios diferentes e nenhum
+  # lê o do outro, mas o frontmatter carrega os campos dos dois — cada um ignora
+  # o que não conhece —, então duplicar o corpo só criaria divergência.
+  # Se o link não puder ser criado (sistema de arquivos sem symlink), cai para
+  # cópia: dois arquivos que funcionam valem mais que um link quebrado.
+  link_keep() {
+    # Link pendurado: alguém apagou o .claude/. Não recrio nem sobrescrevo —
+    # um 'cp' aqui escreveria *através* do link e ressuscitaria o arquivo que
+    # a pessoa acabou de apagar. Só aviso.
+    if [ -L "$dest/$2" ] && [ ! -e "$dest/$2" ]; then
+      printf '  %s!%s %-32s symlink quebrado (alvo %s sumiu)\n' \
+        "$ylw" "$rst" "$2" "$1"
+      kept=$((kept + 1))
+    elif [ -e "$dest/$2" ]; then
+      printf '  %s—%s %-32s já existe, mantido\n' "$ylw" "$rst" "$2"
+      kept=$((kept + 1))
+    elif ln -s "$1" "$dest/$2" 2>/dev/null; then
+      printf '  %s✓%s %-32s %s→ %s%s\n' "$grn" "$rst" "$2" "$dim" "$1" "$rst"
+    else
+      cp "$src/$3" "$dest/$2"
+      printf '  %s✓%s %-32s copiado %s(symlink indisponível)%s\n' \
+        "$grn" "$rst" "$2" "$dim" "$rst"
+    fi
+  }
+
   copy_keep .claude/commands/planejar.md .claude/commands/planejar.md
   copy_keep .claude/commands/revisar.md  .claude/commands/revisar.md
   copy_keep .ai/implementer.md           .ai/implementer.md
   copy_keep REASONIX.md                  REASONIX.md
+  copy_keep .opencode/agents/planejador.md .opencode/agents/planejador.md
+  copy_keep .opencode/agents/revisor.md    .opencode/agents/revisor.md
+  link_keep ../../.claude/commands/planejar.md .opencode/commands/planejar.md \
+            .claude/commands/planejar.md
+  link_keep ../../.claude/commands/revisar.md  .opencode/commands/revisar.md \
+            .claude/commands/revisar.md
 
   install_settings
   printf '\n'
@@ -231,7 +287,11 @@ cmd_install() {
   printf '     (roda da raiz, termina sozinho, código de saída confiável)\n'
   printf '  2. commitar — a worktree só enxerga o que está commitado:\n\n'
   printf '     cd "%s"\n' "$dest"
-  printf '     git add REASONIX.md .ai .claude && git status --short\n\n'
+  printf '     git add REASONIX.md .ai .claude .opencode && git status --short\n\n'
+  printf '  %sO .opencode/ é inerte se você só usa o Claude Code — e vice-versa.%s\n' \
+    "$dim" "$rst"
+  printf '  %sPara o aif falar do OpenCode: export AIF_ORCHESTRATOR=opencode%s\n\n' \
+    "$dim" "$rst"
 }
 
 # Onde a statusline e os hooks do pacote já estão, se é que estão. O Claude Code
@@ -425,7 +485,7 @@ PY
   printf '  worktree  %s\n\n' "$wt"
   printf '%sPróximo passo:%s abra os dois agentes na worktree e planeje.\n\n' "$bold" "$rst"
   printf '    cd "%s"\n' "$wt"
-  printf '    claude          %s# depois: /planejar %s%s\n' "$dim" "$desc" "$rst"
+  printf '    %-15s %s# depois: /planejar %s%s\n' "$ORCH_CMD" "$dim" "$desc" "$rst"
 }
 
 cmd_cd() { read_state; printf '%s\n' "$WORKTREE"; }
@@ -465,17 +525,20 @@ cmd_status() {
 
   printf '\n%s→ próximo passo:%s ' "$bold" "$rst"
   if [ "$p" != "ok" ]; then
-    printf 'no %sClaude Code%s, dentro da worktree: %s/planejar %s%s\n\n' \
-      "$cyn" "$rst" "$bold" "$DESCRIPTION" "$rst"
+    printf 'no %s%s%s, dentro da worktree: %s/planejar %s%s\n\n' \
+      "$cyn" "$ORCH_NAME" "$rst" "$bold" "$DESCRIPTION" "$rst"
   elif ! has_code_changes; then
-    printf 'no %sReasonix%s: cole o bloco /goal que o Claude Code imprimiu.\n\n' "$cyn" "$rst"
+    printf 'no %sReasonix%s: cole o bloco /goal que o %s imprimiu.\n\n' \
+      "$cyn" "$rst" "$ORCH_NAME"
   elif [ "$r" = "missing" ]; then
-    printf 'no %sClaude Code%s: %s/revisar%s\n\n' "$cyn" "$rst" "$bold" "$rst"
+    printf 'no %s%s%s: %s/revisar%s\n\n' "$cyn" "$ORCH_NAME" "$rst" "$bold" "$rst"
   else
     case "$r" in
       approved:*) printf 'rode %saif accept%s para commitar.\n\n' "$bold" "$rst" ;;
-      changes:*)  printf 'no %sReasonix%s: cole o bloco de correção que o Claude Code imprimiu.\n\n' "$cyn" "$rst" ;;
-      *)          printf 'o %s.ai/review.json%s está inválido; peça ao Claude Code para reescrevê-lo.\n\n' "$bold" "$rst" ;;
+      changes:*)  printf 'no %sReasonix%s: cole o bloco de correção que o %s imprimiu.\n\n' \
+                    "$cyn" "$rst" "$ORCH_NAME" ;;
+      *)          printf 'o %s.ai/review.json%s está inválido; peça ao %s para reescrevê-lo.\n\n' \
+                    "$bold" "$rst" "$ORCH_NAME" ;;
     esac
   fi
 }
@@ -589,9 +652,13 @@ cmd_drop() {
   printf '%s✓ removidos%s\n' "$grn" "$rst"
 }
 
+# ${1+"$@"} e não "$@": o bash 3.2 que vem no macOS trata "$@" como variável
+# não definida sob 'set -u' quando não sobrou nenhum parâmetro. Sem o guarda,
+# um 'aif install' sem argumento morria com "unbound variable" em vez de
+# imprimir o uso. Em bash 4.4+ as duas formas são equivalentes.
 case "${1:-status}" in
-  install) shift; cmd_install "$@" ;;
-  open)   shift; cmd_open "$@" ;;
+  install) shift; cmd_install ${1+"$@"} ;;
+  open)   shift; cmd_open ${1+"$@"} ;;
   cd)     cmd_cd ;;
   status) cmd_status ;;
   verify) cmd_verify ;;

@@ -1,6 +1,7 @@
 ---
 description: Revisa o diff contra o plano, escreve review.json e diz o próximo passo
 allowed-tools: Read, Glob, Grep, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(aif status:*), Write
+agent: revisor
 ---
 
 # Papel: Revisor
@@ -98,7 +99,7 @@ Corrija todas as questões CRITICAL, HIGH e MEDIUM de .ai/review.json.
 
 Output format:
 Para cada questão, diga em uma linha o que mudou. Depois rode os testes e
-encerre com a linha exata: PRONTO → peça ao Claude Code revisar.
+encerre com a linha exata: PRONTO → peça a revisão ao orquestrador.
 
 Constraints:
 Não trate as questões LOW agora.

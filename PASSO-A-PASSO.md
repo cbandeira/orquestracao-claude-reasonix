@@ -1,9 +1,14 @@
-# Loop manual Claude Code ⇄ Reasonix — passo a passo
+# Loop manual orquestrador ⇄ Reasonix — passo a passo
 
 O `ai-flow` continua existindo e continua funcionando. O que muda aqui é quem
 dirige: os modelos rodam nas GUIs, na sua frente, e o `aif` faz o papel de
 cartório — git, validação, commit e integração. Nada roda escondido em
 `subprocess`.
+
+São três papéis e dois agentes. O **orquestrador** planeja e revisa; o
+**worker** implementa; você commita e integra. O orquestrador pode ser o Claude
+Code ou o OpenCode — os dois leem o mesmo prompt, cada um do seu diretório —, e
+o worker aqui é o Reasonix.
 
 ---
 
@@ -12,11 +17,26 @@ cartório — git, validação, commit e integração. Nada roda escondido em
 | Arquivo | Onde vai | Para que serve |
 |---|---|---|
 | `aif` | `~/.local/bin/aif` | o cartório: worktree, semáforo, validação, commit, merge |
-| `.claude/commands/planejar.md` | raiz do projeto | slash command `/planejar` |
-| `.claude/commands/revisar.md` | raiz do projeto | slash command `/revisar` |
+| `.claude/commands/planejar.md` | raiz do projeto | o prompt do papel de planejador |
+| `.claude/commands/revisar.md` | raiz do projeto | o prompt do papel de revisor |
+| `.opencode/commands/*.md` | raiz do projeto | symlinks para os dois de cima |
+| `.opencode/agents/planejador.md` | raiz do projeto | as travas de ferramenta do planejador no OpenCode |
+| `.opencode/agents/revisor.md` | raiz do projeto | idem, para o revisor |
 | `.claude/settings.json` | raiz do projeto | statusline com tokens + notificações — **mesclar, não sobrescrever** |
 | `.ai/implementer.md` | raiz do projeto | contrato permanente do worker |
 | `REASONIX.md` | raiz do projeto | instruções que o Reasonix carrega sozinho |
+
+Os arquivos de comando são **um só, em dois lugares**. O Claude Code lê
+`.claude/commands/`, o OpenCode lê `.opencode/commands/`, e nenhum lê o do
+outro — mas o frontmatter carrega os campos das duas ferramentas e cada uma
+ignora o que não conhece, então o corpo do prompt não precisa ser duplicado.
+Você edita `.claude/commands/planejar.md` e as duas veem a mudança.
+
+Os `agents/` existem porque o OpenCode não tem o campo `allowed-tools` do
+Claude Code: lá a restrição de ferramenta mora no agente, e o comando aponta
+para ele pelo campo `agent:`. O efeito é o mesmo — o planejador só escreve
+`.ai/current-task.md`, o revisor só escreve `.ai/review.json`, e o `bash` de
+ambos nega tudo menos os comandos de leitura.
 
 ---
 
@@ -31,9 +51,19 @@ aif --help
 
 Se `aif` não for encontrado, falta `~/.local/bin` no `PATH`.
 
-Dependências: `git`, `bash`, `python3`, `iconv`. O `jq` só é necessário para a
-statusline do Claude Code, e o `notify-send` (pacote `libnotify-bin`) só para
-as notificações.
+Dependências: `git`, `bash` e `python3`. O `jq` só é necessário para a
+statusline do Claude Code, e as notificações usam o que existir — `notify-send`
+(pacote `libnotify-bin`) no Linux, `osascript` no macOS.
+
+**Linux e macOS.** O `aif` roda nos dois. Ele não usa nada de bash 4+, então o
+bash 3.2 que vem no macOS basta, e evita de propósito as ferramentas cujo
+comportamento diverge entre GNU e BSD: nada de `sed -i`, `readlink -f` ou
+`iconv //TRANSLIT`. Onde a divergência apareceria — a normalização do slug da
+branch —, o trabalho é feito em `python3`, que dá o mesmo resultado nos dois
+sistemas e em qualquer locale.
+
+Duas coisas no macOS não vêm de fábrica e você instala à parte: o `python3`
+(vem com as Command Line Tools do Xcode) e o `jq`, se quiser a statusline.
 
 ## 2. Instalação, uma vez por projeto
 
@@ -42,8 +72,15 @@ aif install /caminho/do/seu/projeto
 ```
 
 Rode da raiz deste pacote — ou de qualquer lugar, passando `--from <raiz do
-pacote>`. Ele copia os cinco arquivos e **nunca sobrescreve**: o que já existe
-no destino fica como está, e ele diz na tela o que pulou.
+pacote>`. Ele instala os arquivos da tabela acima e **nunca sobrescreve**: o
+que já existe no destino fica como está, e ele diz na tela o que pulou. Os dois
+`.opencode/commands/` ele cria como symlink relativo; se o sistema de arquivos
+não aceitar symlink, ele cai para cópia e avisa.
+
+O `.opencode/` é instalado mesmo que você só use o Claude Code. São quatro
+arquivos pequenos e inertes: ferramenta que não lê aquele diretório não é
+afetada por ele. Isso é de propósito — trocar de orquestrador depois não deve
+exigir reinstalar nada.
 
 O `.claude/settings.json` tem tratamento à parte, porque é o único do pacote
 que costuma disputar espaço com algo que já existe. Um projeto que já usa
@@ -83,12 +120,13 @@ Depois **ajuste duas coisas**:
 Por fim, **commite**. Não é zelo, é requisito: o `aif open` monta a worktree com
 `git worktree add`, então ela contém só o que está commitado na branch base. O
 `.ai/implementer.md` e o `.ai/decisions.md` o `aif` copia à mão para dentro da
-worktree, e por isso sobrevivem sem commit; o `REASONIX.md` e o
-`.claude/commands/` não — sem commit, o Reasonix abre a worktree sem as
-instruções do projeto e o `/planejar` nem aparece no Claude Code.
+worktree, e por isso sobrevivem sem commit; o `REASONIX.md`, o
+`.claude/commands/` e o `.opencode/` não — sem commit, o Reasonix abre a
+worktree sem as instruções do projeto e o `/planejar` nem aparece no
+orquestrador.
 
 ```bash
-cd /caminho/do/seu/projeto && git add REASONIX.md .ai .claude && git status --short
+cd /caminho/do/seu/projeto && git add REASONIX.md .ai .claude .opencode && git status --short
 ```
 
 Leia esse `git status` antes de commitar. Tudo que veio do pacote é arquivo
@@ -100,17 +138,43 @@ queria.
 Se o projeto já tem `.ai/decisions.md` do `ai-flow`, ele é aproveitado: o `aif`
 copia esse arquivo para dentro de cada worktree, e os três papéis o leem.
 
-## 3. Preparando as duas janelas
+## 3. Escolhendo o orquestrador, e preparando as duas janelas
 
-A ideia é não ter que caçar janela. Duas opções:
+O orquestrador é quem roda `/planejar` e `/revisar`. Claude Code e OpenCode
+servem igual: leem o mesmo prompt, escrevem os mesmos `.ai/current-task.md` e
+`.ai/review.json`, e o `aif` valida os dois do mesmo jeito. Nada no cartório
+sabe qual você usou.
 
-**A — tudo num VS Code só (recomendado).** Instale a extensão do Claude Code e
-a extensão do Reasonix (`SivanLiu.reasonix-agent`, que sobe o backend
-`reasonix acp` local — a CLI precisa estar instalada antes). Abra a worktree
-como pasta e deixe os dois painéis lado a lado.
+Diga ao `aif` qual é, e ele passa a citar o nome certo no semáforo:
 
-**B — dois apps desktop.** Claude Code no app desktop e o Reasonix no app dele.
-Aí o alt-tab volta, mas as notificações do passo 8 avisam quando é a hora.
+```bash
+export AIF_ORCHESTRATOR=opencode   # ou: claude (padrão)
+```
+
+Isso muda só o texto que o `aif` imprime — nenhuma validação depende disso.
+
+Duas diferenças reais entre eles, para você escolher com os olhos abertos:
+
+- **As travas de ferramenta.** No Claude Code elas vêm do `allowed-tools` do
+  próprio comando; no OpenCode, do agente em `.opencode/agents/`. A do OpenCode
+  é mais apertada num ponto: ela restringe *quais caminhos* podem ser escritos,
+  então o planejador literalmente não consegue tocar em código. O
+  `allowed-tools` do Claude Code concede `Write` sem restrição de destino — a
+  regra "não escreva código" ali é o prompt pedindo, não o harness impedindo.
+- **A statusline e as notificações** do passo 8 são do Claude Code. O OpenCode
+  não lê `.claude/settings.json`; se você orquestrar por lá, perde o aviso de
+  "terminou" e precisa olhar a janela.
+
+Escolhido isso, a ideia é não ter que caçar janela. Duas montagens:
+
+**A — tudo num VS Code só (recomendado).** Instale a extensão do orquestrador
+que você escolheu e a extensão do Reasonix (`SivanLiu.reasonix-agent`, que sobe
+o backend `reasonix acp` local — a CLI precisa estar instalada antes). Abra a
+worktree como pasta e deixe os dois painéis lado a lado.
+
+**B — dois apps desktop.** O orquestrador no app dele e o Reasonix no app dele.
+Aí o alt-tab volta, mas as notificações do passo 8 avisam quando é a hora — se
+o orquestrador for o Claude Code.
 
 ## 4. Abrindo uma tarefa
 
@@ -148,9 +212,9 @@ cd "$(aif cd)"
 Abra os dois agentes **nessa pasta**. Isso importa: é a worktree que isola a
 tarefa, e é lá que os artefatos vivem.
 
-## 5. Planejar (Claude Code)
+## 5. Planejar (orquestrador)
 
-No Claude Code, dentro da worktree:
+No orquestrador, dentro da worktree:
 
 ```
 /planejar Adicionar rate limiting no endpoint de login
@@ -170,7 +234,7 @@ aif status
 
 ## 6. Implementar (Reasonix)
 
-Copie o bloco que o Claude Code imprimiu e cole no Reasonix. É um *task
+Copie o bloco que o orquestrador imprimiu e cole no Reasonix. É um *task
 contract* no formato que ele espera: contexto, request, formato de saída,
 restrições e política de pausa.
 
@@ -178,15 +242,15 @@ Deixe rodando. Ele lê `REASONIX.md` → `.ai/implementer.md` → `.ai/current-t
 implementa, roda os testes e encerra com:
 
 ```
-PRONTO → peça ao Claude Code revisar.
+PRONTO → peça a revisão ao orquestrador.
 ```
 
-Se aparecer `CONFLITO DE PLANO`, não force: volte ao Claude Code e replaneje.
+Se aparecer `CONFLITO DE PLANO`, não force: volte ao orquestrador e replaneje.
 É o worker dizendo que o mapa não bate com o território.
 
-## 7. Revisar (Claude Code)
+## 7. Revisar (orquestrador)
 
-De volta ao Claude Code, na mesma sessão:
+De volta ao orquestrador, na mesma sessão:
 
 ```
 /revisar
@@ -214,7 +278,7 @@ tocar na base. Ficam de fora do commit o `.ai/current-task.md`, o
 worker são efêmeros e por worktree — commitá-los faz a tarefa seguinte nascer
 com o plano e o `approved` da anterior.
 
-Por que não deixar o Claude Code commitar sozinho? Porque foi ele que escreveu
+Por que não deixar o orquestrador commitar sozinho? Porque foi ele que escreveu
 o veredito. Um portão que o próprio revisado abre não é um portão — é
 decoração. `aif accept` é uma tecla; a independência vale a tecla.
 
@@ -266,6 +330,9 @@ branch (com aviso, se a tarefa já tinha sido aceita).
 
 ## Vendo tokens e sendo avisado
 
+Esta seção inteira vale só se o orquestrador for o Claude Code — o OpenCode não
+lê `.claude/settings.json` e o pacote não traz equivalente para ele.
+
 O `.claude/settings.json` do pacote faz duas coisas:
 
 **Statusline** com modelo, projeto, custo acumulado e tokens da sessão — algo
@@ -274,11 +341,12 @@ recebe podem mudar entre versões; se a linha vier vazia, confira a referência
 em `code.claude.com/docs/en/hooks`. Para consulta pontual, `/context` e `/cost`
 resolvem sem configurar nada.
 
-**Hooks `Stop` e `Notification`** disparam `notify-send` quando o Claude termina
-ou quando precisa de você. Os hooks disparam igual no terminal, nas extensões de
-IDE, no app desktop e na web — então funciona em qualquer das duas montagens do
-passo 3. Em macOS, troque `notify-send` por `osascript -e 'display notification …'`
-ou um `afplay`.
+**Hooks `Stop` e `Notification`** avisam quando o Claude termina ou quando
+precisa de você. Cada hook procura primeiro o `notify-send` do Linux e cai para
+o `osascript` do macOS, então o mesmo `settings.json` serve nos dois; se não
+achar nenhum dos dois, não faz nada e não atrapalha. Os hooks disparam igual no
+terminal, nas extensões de IDE, no app desktop e na web — então funciona em
+qualquer das duas montagens do passo 3.
 
 No lado do Reasonix, o app desktop já mostra o loop de ferramentas, as
 aprovações e os checkpoints por turno. Como você vai estar olhando, use o modo
@@ -296,15 +364,19 @@ aif status
 
 | Estado | Próximo passo |
 |---|---|
-| plano ausente ou inválido | Claude Code: `/planejar` |
+| plano ausente ou inválido | orquestrador: `/planejar` |
 | plano ok, sem mudanças de código | Reasonix: cole o bloco `/goal` |
-| mudanças de código, sem revisão | Claude Code: `/revisar` |
+| mudanças de código, sem revisão | orquestrador: `/revisar` |
 | revisão exige mudanças | Reasonix: cole o bloco de correção |
 | revisão aprovada | `aif accept` |
 | aceita, integração pendente | teste de verdade, depois `aif land` |
 
 Comandos completos: `install`, `open`, `cd`, `status`, `verify`, `accept`,
 `land`, `drop`.
+
+Variáveis de ambiente: `AIF_BRANCH_PREFIX` (padrão `ai`), `AIF_WORKTREE_DIR`
+(padrão `../.ai-flow-worktrees`), `AIF_COMMIT_PREFIX` (padrão `feat`) e
+`AIF_ORCHESTRATOR` (padrão `claude`; aceita `opencode`).
 
 Enquanto houver uma tarefa aceita e não integrada, o `aif open` recusa abrir
 outra — feche o ciclo com `land` ou `drop` primeiro.

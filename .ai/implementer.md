@@ -43,7 +43,7 @@ Ao terminar, produza nesta ordem:
 4. Uma única linha de status, exatamente uma destas:
 
 ```
-PRONTO → peça ao Claude Code revisar.
+PRONTO → peça a revisão ao orquestrador.
 ```
 
 ```
@@ -53,7 +53,7 @@ CONFLITO DE PLANO → o plano não pode ser aplicado.
 Use `CONFLITO DE PLANO` quando o plano contradiz o estado real do código — por
 exemplo, aponta para módulos que não existem ou pressupõe uma arquitetura que o
 repositório não tem. Explique o conflito em uma frase e **pare**. Não improvise
-um plano diferente: quem replaneja é o Claude Code.
+um plano diferente: quem replaneja é o orquestrador.
 
 ```
 BLOQUEADO → não consegui terminar.
