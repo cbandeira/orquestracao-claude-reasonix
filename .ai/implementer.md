@@ -43,7 +43,7 @@ Ao terminar, produza nesta ordem:
 4. Uma única linha de status, exatamente uma destas:
 
 ```
-PRONTO → peça a revisão ao orquestrador.
+PRONTO → devolva ao orquestrador.
 ```
 
 ```

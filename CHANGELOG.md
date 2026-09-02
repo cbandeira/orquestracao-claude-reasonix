@@ -16,6 +16,16 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.0.1 — 2026-09-01
+
+- Corrige a linha de status do worker: era `PRONTO → peça a revisão ao
+  orquestrador`, e o Reasonix a lia como instrução para rodar sua skill
+  embutida de review (gastando tokens num trabalho que o `/revisar` já faz).
+  Agora é `PRONTO → devolva ao orquestrador`, em `.ai/implementer.md`,
+  `.claude/commands/planejar.md` e `.claude/commands/revisar.md`. O `aif` não
+  valida esse texto — ele lê `.ai/review.json` — então nenhum comando muda de
+  comportamento.
+
 ## 1.0.0 — 2026-08-27
 
 Primeira versão numerada. Consolida o loop manual completo, já em uso:

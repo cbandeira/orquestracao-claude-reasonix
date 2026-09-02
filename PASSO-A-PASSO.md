@@ -249,7 +249,7 @@ Deixe rodando. Ele lê `REASONIX.md` → `.ai/implementer.md` → `.ai/current-t
 implementa, roda os testes e encerra com:
 
 ```
-PRONTO → peça a revisão ao orquestrador.
+PRONTO → devolva ao orquestrador.
 ```
 
 Se aparecer `CONFLITO DE PLANO`, não force: volte ao orquestrador e replaneje.

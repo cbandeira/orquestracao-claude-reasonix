@@ -1,8 +1,13 @@
 ---
-description: Revisa o diff contra o plano, escreve review.json e diz o próximo passo
-allowed-tools: Read, Glob, Grep, Bash(git diff:*), Bash(git log:*), Bash(git status:*), Bash(aif status:*), Write
-agent: revisor
+name: "source-command-revisar"
+description: "Revisa o diff contra o plano, escreve review.json e diz o próximo passo"
 ---
+
+# source-command-revisar
+
+Use this skill when the user asks to run the migrated source command `revisar`.
+
+## Command Template
 
 # Papel: Revisor
 

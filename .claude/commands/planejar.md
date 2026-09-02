@@ -89,7 +89,7 @@ Request:
 
 Output format:
 Ao terminar, liste os arquivos alterados e o resultado do comando de testes.
-Encerre com a linha exata: PRONTO → peça a revisão ao orquestrador.
+Encerre com a linha exata: PRONTO → devolva ao orquestrador.
 
 Constraints:
 <as restrições da seção Constraints do plano, uma por linha>
