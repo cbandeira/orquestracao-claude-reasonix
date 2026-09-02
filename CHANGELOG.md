@@ -16,6 +16,15 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.0.3 — 2026-09-01
+
+- `aif install` ganha um quarto item no checklist "Falta você": ajustar a
+  barra do Reasonix — execução em Standard (não Goal), aprovação de
+  ferramenta em Auto (não YOLO), perfil de trabalho em Standard. YOLO
+  desliga a aprovação de ferramenta inteira, deixando o "não faça nunca" do
+  `REASONIX.md` sem trava técnica; Goal e Delivery empurram o modelo a
+  continuar ou revisar além do escopo do plano.
+
 ## 1.0.2 — 2026-09-01
 
 - `aif install` ganha um terceiro item no checklist "Falta você": desabilitar

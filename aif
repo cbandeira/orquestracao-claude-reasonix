@@ -32,7 +32,7 @@ set -euo pipefail
 # Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
 # MINOR acrescenta comando ou campo, PATCH corrige comportamento.
 # O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
-AIF_VERSION="1.0.2"
+AIF_VERSION="1.0.3"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
@@ -302,6 +302,17 @@ cmd_install() {
   printf '     %s~/.reasonix/config.toml%s → [skills] disabled_skills = ["review",\n' \
     "$bold" "$rst"
   printf '     "review-bugbot", "review-security", "security-review"]\n\n'
+  printf '  4. na barra do Reasonix: execução em %sStandard%s (não Goal), aprovação\n' \
+    "$bold" "$rst"
+  printf '     de ferramenta em %sAuto%s (não YOLO); perfil de trabalho em Standard\n' \
+    "$bold" "$rst"
+  printf '     já é o certo — evite Delivery.\n\n'
+  printf '     %sYOLO desliga a aprovação de ferramenta inteira: o "não faça nunca"%s\n' \
+    "$dim" "$rst"
+  printf '     %sdo REASONIX.md vira pedido sem trava. Goal e Delivery empurram o%s\n' \
+    "$dim" "$rst"
+  printf '     %smodelo a continuar ou revisar além do escopo do plano.%s\n\n' \
+    "$dim" "$rst"
   printf '  %sO .opencode/ é inerte se você só usa o Claude Code — e vice-versa.%s\n' \
     "$dim" "$rst"
   printf '  %sPara o aif falar do OpenCode: export AIF_ORCHESTRATOR=opencode%s\n\n' \
