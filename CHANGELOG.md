@@ -16,6 +16,14 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.0.2 — 2026-09-01
+
+- `aif install` ganha um terceiro item no checklist "Falta você": desabilitar
+  as skills de review do Reasonix (`~/.reasonix/config.toml` →
+  `disabled_skills`). É lembrete de configuração de máquina, não de tarefa —
+  por isso fica no `install`, que roda uma vez por projeto, e não no `open`,
+  que roda uma vez por tarefa.
+
 ## 1.0.1 — 2026-09-01
 
 - Corrige a linha de status do worker: era `PRONTO → peça a revisão ao
