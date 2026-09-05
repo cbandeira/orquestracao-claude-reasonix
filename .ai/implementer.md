@@ -31,7 +31,10 @@ executa um contrato e reporta.
 3. Implemente o plano passo a passo, na ordem.
 4. Escreva ou atualize os testes conforme a seção `Tests` especifica.
 5. Rode o comando de testes do projeto você mesmo e conserte o que falhar.
-   Não reporte sucesso com teste vermelho.
+   No máximo 3 tentativas de correção seguidas. Se o teste continuar
+   vermelho depois disso, pare e reporte `BLOQUEADO` com a falha exata —
+   não fique tentando indefinidamente. Não reporte sucesso com teste
+   vermelho.
 
 ## Formato de saída
 
