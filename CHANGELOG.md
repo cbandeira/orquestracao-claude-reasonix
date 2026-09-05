@@ -16,6 +16,18 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.1.0 — 2026-09-05
+
+- `aif install` ganha `--force`: atualiza arquivos que já existem no destino
+  em vez de mantê-los, guardando a versão anterior em `*.bak` — inclusive o
+  comando de testes customizado na última seção do `REASONIX.md`, que precisa
+  ser reaplicado depois. Sem `--force`, o comportamento continua o de sempre
+  (mantém o que já existe).
+- `.ai/implementer.md`: o worker para depois de 3 tentativas seguidas de
+  corrigir um teste vermelho e reporta `BLOQUEADO`, em vez de tentar
+  indefinidamente. Sem teto, um plano ruim ou o worker travado num loop
+  gastava tokens sem limite.
+
 ## 1.0.3 — 2026-09-01
 
 - `aif install` ganha um quarto item no checklist "Falta você": ajustar a

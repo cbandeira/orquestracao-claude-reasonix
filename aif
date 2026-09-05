@@ -9,7 +9,7 @@
 # O orquestrador (quem planeja e revisa) pode ser o Claude Code ou o OpenCode:
 # os dois leem o mesmo prompt, cada um do seu diretório. Veja AIF_ORCHESTRATOR.
 #
-#   aif install <projeto>    copia o pacote para um projeto, sem sobrescrever
+#   aif install <projeto>    copia o pacote para um projeto (--force atualiza)
 #   aif open "<descrição>"   cria branch + worktree + esqueleto do contrato
 #   aif cd                   imprime o caminho da worktree (use: cd "$(aif cd)")
 #   aif status               o semáforo: onde estamos e qual o próximo passo
@@ -32,7 +32,7 @@ set -euo pipefail
 # Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
 # MINOR acrescenta comando ou campo, PATCH corrige comportamento.
 # O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
-AIF_VERSION="1.0.3"
+AIF_VERSION="1.1.0"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
@@ -197,15 +197,16 @@ base_branch() {
 # -------------------------------------------------------------------- comandos
 
 cmd_install() {
-  local src="" dest=""
+  local src="" dest="" force=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --from) src="${2:-}"; [ -n "$src" ] || die "--from exige um caminho"; shift 2 ;;
-      -*)     die "opção desconhecida: $1" ;;
-      *)      [ -z "$dest" ] || die "só um projeto por vez"; dest="$1"; shift ;;
+      --from)  src="${2:-}"; [ -n "$src" ] || die "--from exige um caminho"; shift 2 ;;
+      --force) force=1; shift ;;
+      -*)      die "opção desconhecida: $1" ;;
+      *)       [ -z "$dest" ] || die "só um projeto por vez"; dest="$1"; shift ;;
     esac
   done
-  [ -n "$dest" ] || die "uso: aif install <caminho/do/projeto> [--from <raiz do pacote>]"
+  [ -n "$dest" ] || die "uso: aif install <caminho/do/projeto> [--from <raiz do pacote>] [--force]"
   [ -d "$dest" ] || die "o destino não existe: $dest"
   dest="$(cd "$dest" && pwd)"
 
@@ -231,14 +232,26 @@ cmd_install() {
   mkdir -p "$dest/.claude/commands" "$dest/.ai" \
            "$dest/.opencode/commands" "$dest/.opencode/agents"
 
-  # Nada aqui sobrescreve: quem já existe no destino ganha. Um settings.json
-  # do projeto vale mais que o do pacote, e o mesmo vale para um REASONIX.md
-  # que você já ajustou.
-  local kept=0
+  # Sem --force, quem já existe no destino ganha: um settings.json do projeto
+  # vale mais que o do pacote, e o mesmo vale para um REASONIX.md que você já
+  # ajustou. Com --force, atualiza mesmo assim, mas guarda o antigo em .bak —
+  # inclusive o comando de testes que você tinha customizado na última seção
+  # do REASONIX.md, que precisa ser reaplicado depois.
+  local kept=0 updated=0
   copy_keep() {
     if [ -e "$dest/$2" ]; then
-      printf '  %s—%s %-32s já existe, mantido\n' "$ylw" "$rst" "$2"
-      kept=$((kept + 1))
+      if diff -q "$src/$1" "$dest/$2" >/dev/null 2>&1; then
+        printf '  %s✓%s %-32s já atualizado\n' "$grn" "$rst" "$2"
+      elif [ "$force" = "1" ]; then
+        cp "$dest/$2" "$dest/$2.bak"
+        cp "$src/$1" "$dest/$2"
+        printf '  %s↻%s %-32s atualizado %s(backup em %s.bak)%s\n' \
+          "$grn" "$rst" "$2" "$dim" "$2" "$rst"
+        updated=$((updated + 1))
+      else
+        printf '  %s—%s %-32s já existe, mantido\n' "$ylw" "$rst" "$2"
+        kept=$((kept + 1))
+      fi
     else
       cp "$src/$1" "$dest/$2"
       printf '  %s✓%s %-32s copiado\n' "$grn" "$rst" "$2"
@@ -284,11 +297,17 @@ cmd_install() {
   install_settings
   printf '\n'
 
+  if [ "$updated" -gt 0 ]; then
+    printf '%s%s arquivo(s) atualizados; versão anterior guardada como *.bak.%s\n\n' \
+      "$dim" "$updated" "$rst"
+  fi
   if [ "$kept" -gt 0 ]; then
     printf '%s%s arquivo(s) já existiam e ficaram como estavam.%s\n' \
       "$dim" "$kept" "$rst"
     printf '%sCompare com o pacote se quiser as versões novas:%s\n' "$dim" "$rst"
     printf '%s  diff -ru "%s" "%s" | less%s\n\n' "$dim" "$src" "$dest" "$rst"
+    printf '%sOu rode de novo com %s--force%s%s para atualizar sem perguntar.%s\n\n' \
+      "$dim" "$bold" "$rst" "$dim" "$rst"
   fi
 
   printf '%sFalta você:%s\n\n' "$bold" "$rst"
