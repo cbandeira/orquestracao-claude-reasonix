@@ -90,6 +90,8 @@ O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
 | `.ai/implementer.md` | contrato permanente do worker |
 | `REASONIX.md` | o que o Reasonix carrega ao abrir a worktree |
 | `.claude/settings.json` | statusline e notificações (Claude Code) |
+| `ARQUITETURA.md` | componentes, limites, estado e fluxo do sistema |
+| `docs/adr/` | decisões arquiteturais e suas justificativas |
 | `CHANGELOG.md` | o que mudou em cada versão do pacote |
 
 ## Versão
@@ -106,6 +108,9 @@ pacote nos projetos que já usam o loop.
 
 ## Documentação
 
-[PASSO-A-PASSO.md](PASSO-A-PASSO.md) — o passo a passo completo, com os porquês
-de cada decisão: por que a worktree fica fora do repositório, por que o
-`settings.json` não é copiado por cima, por que `aif accept` é uma tecla sua.
+- [PASSO-A-PASSO.md](PASSO-A-PASSO.md) — manual completo de instalação e uso.
+- [ARQUITETURA.md](ARQUITETURA.md) — componentes, contratos, estado, fronteiras
+  e fluxo do sistema.
+- [docs/adr/](docs/adr/) — decisões arquiteturais e suas justificativas
+  históricas.
+- [CHANGELOG.md](CHANGELOG.md) — mudanças de cada versão do pacote.

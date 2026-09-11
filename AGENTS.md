@@ -5,11 +5,14 @@
 This repository packages a human-in-the-loop development workflow. The `aif`
 file is the executable Bash CLI and the primary implementation. `README.md`
 is the concise overview; `PASSO-A-PASSO.md` explains the full operational
-flow; and `CHANGELOG.md` records releases. `REASONIX.md` and
+flow; `ARQUITETURA.md` describes the current architecture; `docs/adr/` records
+architectural decisions; and `CHANGELOG.md` records releases. `REASONIX.md` and
 `.ai/implementer.md` define the worker contract. Agent prompts live in
 `.claude/commands/`; `.opencode/commands/` and `.opencode/agents/` provide the
 OpenCode integration, while `.agents/skills/` and `.codex/` provide the Codex
 integration. Keep matching behavior aligned across all three orchestrators.
+Update `ARQUITETURA.md` when component boundaries or invariants change, and
+add an ADR for new structural decisions instead of rewriting accepted ADRs.
 
 ## Build, Test, and Development Commands
 

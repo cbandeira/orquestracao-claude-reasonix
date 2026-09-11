@@ -5,6 +5,9 @@ dirige: os modelos rodam nas GUIs, na sua frente, e o `aif` faz o papel de
 cartório — git, validação, commit e integração. Nada roda escondido em
 `subprocess`.
 
+Para o mapa de componentes e suas fronteiras, consulte `ARQUITETURA.md`. Para
+as justificativas históricas das decisões, consulte `docs/adr/`.
+
 São três papéis e dois agentes. O **orquestrador** planeja e revisa; o
 **worker** implementa; você commita e integra. O orquestrador pode ser Claude
 Code, Codex ou OpenCode — os três seguem o mesmo protocolo —, e o worker aqui é
