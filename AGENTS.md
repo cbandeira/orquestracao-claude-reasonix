@@ -8,7 +8,8 @@ is the concise overview; `PASSO-A-PASSO.md` explains the full operational
 flow; and `CHANGELOG.md` records releases. `REASONIX.md` and
 `.ai/implementer.md` define the worker contract. Agent prompts live in
 `.claude/commands/`; `.opencode/commands/` and `.opencode/agents/` provide the
-equivalent OpenCode integration. Keep matching orchestrator behavior aligned.
+OpenCode integration, while `.agents/skills/` and `.codex/` provide the Codex
+integration. Keep matching behavior aligned across all three orchestrators.
 
 ## Build, Test, and Development Commands
 

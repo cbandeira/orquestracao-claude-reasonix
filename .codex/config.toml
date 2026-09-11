@@ -1,0 +1,12 @@
+[permissions.aif-orchestrator]
+description = "Leitura da worktree; escrita somente nos artefatos do aif."
+
+[permissions.aif-orchestrator.filesystem]
+":minimal" = "read"
+
+[permissions.aif-orchestrator.filesystem.":workspace_roots"]
+"." = "read"
+".ai" = "write"
+
+[permissions.aif-orchestrator.network]
+enabled = false

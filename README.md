@@ -44,30 +44,35 @@ cd "$(aif cd)"
 
 | Passo | Quem | O quê |
 |---|---|---|
-| 1 | orquestrador | `/planejar <tarefa>` → escreve `.ai/current-task.md` |
+| 1 | orquestrador | `/planejar <tarefa>` ou `$planejar <tarefa>` → escreve `.ai/current-task.md` |
 | 2 | worker | cola o bloco `/goal` → implementa e roda os testes |
-| 3 | orquestrador | `/revisar` → escreve `.ai/review.json` |
+| 3 | orquestrador | `/revisar` ou `$revisar` → escreve `.ai/review.json` |
 | 4 | você | `aif accept` → valida o veredito e commita |
 | 5 | você | testa de verdade, depois `aif land` → mescla e limpa |
 
 Perdeu o fio? `aif status` diz onde você está e qual é o próximo passo.
 
-## Os dois orquestradores
+## Os três orquestradores
 
 O papel de orquestrador — planejar e revisar — pode ser exercido pelo **Claude
-Code** ou pelo **OpenCode**. O prompt de cada papel é um arquivo só: ele vive em
-`.claude/commands/`, e o `.opencode/commands/` o alcança por symlink. O
-frontmatter carrega os campos das duas ferramentas, e cada uma ignora o que não
-conhece.
+Code**, pelo **Codex** ou pelo **OpenCode**. O prompt de cada papel continua
+sendo um arquivo só em `.claude/commands/`: o OpenCode o alcança por symlink e
+as Skills do Codex o carregam como protocolo canônico.
 
 ```bash
-export AIF_ORCHESTRATOR=opencode   # ou: claude (padrão)
+aif open "Adicionar rate limiting"
+# escolha: 1 Claude Code, 2 Codex ou 3 OpenCode
 ```
 
-As travas de ferramenta são específicas de cada um — `allowed-tools` no Claude
-Code, `.opencode/agents/*.md` no OpenCode — mas têm o mesmo efeito: o planejador
-só escreve o contrato, o revisor só escreve o veredito, e nenhum dos dois toca
-em git que altere estado. A statusline e as notificações do pacote são só do
+A escolha vale somente para a tarefa aberta, fica em `.aif/current.json` e é
+reutilizada pelo `aif status`. Não altera `.bashrc` nem exige `export`. Para
+automação, use `aif open --orchestrator codex "<tarefa>"`.
+
+As travas são específicas de cada ferramenta: `allowed-tools` no Claude Code,
+um perfil de permissões em `.codex/config.toml` no Codex e
+`.opencode/agents/*.md` no OpenCode. O planejador só escreve o contrato, o
+revisor só escreve o veredito, e o estado do Git permanece somente leitura.
+Claude Code e Codex têm notificações; a statusline do pacote é exclusiva do
 Claude Code.
 
 O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
@@ -79,6 +84,8 @@ O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
 |---|---|
 | `aif` | o cartório: worktree, semáforo, validação, commit, merge |
 | `.claude/commands/` | os prompts de `/planejar` e `/revisar` |
+| `.agents/skills/` | as Skills `$planejar` e `$revisar` do Codex |
+| `.codex/` | perfil de escrita restrito a `.ai/` e notificação do Codex |
 | `.opencode/` | symlinks para os mesmos prompts + as travas de ferramenta |
 | `.ai/implementer.md` | contrato permanente do worker |
 | `REASONIX.md` | o que o Reasonix carrega ao abrir a worktree |

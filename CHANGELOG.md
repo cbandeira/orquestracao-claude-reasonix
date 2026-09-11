@@ -1,9 +1,9 @@
 # Changelog
 
 Versões do pacote inteiro — o script `aif`, os prompts em `.claude/` e
-`.opencode/`, o `REASONIX.md` e o `settings.json`. Eles evoluem juntos: um
-contrato novo costuma exigir validação nova, então não faz sentido versionar
-cada peça em separado.
+`.opencode/`, `.agents/`, `.codex/`, o `REASONIX.md` e o `settings.json`. Eles
+evoluem juntos: um contrato novo costuma exigir validação nova, então não faz
+sentido versionar cada peça em separado.
 
 A versão que está rodando: `aif version`. A que um projeto recebeu fica no
 rodapé do `aif install`.
@@ -15,6 +15,21 @@ Semântica:
 - **MINOR** — acrescenta comando, campo ou validação, sem invalidar o que
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
+
+## 1.2.0 — 2026-09-11
+
+- Codex passa a ser um orquestrador de primeira classe, com Skills `$planejar`
+  e `$revisar`, perfil de permissões que restringe escrita a `.ai/` e hook de
+  notificação ao terminar.
+- `aif install` instala e mescla os artefatos do Codex sem sobrescrever
+  configurações ou hooks existentes do projeto.
+- `aif open` pergunta, a cada tarefa, entre Claude Code, Codex e OpenCode. A
+  escolha fica somente no estado da tarefa, funciona entre terminais e não
+  altera configuração persistente do shell.
+- `aif open --orchestrator <nome>` permite seleção não interativa e
+  `AIF_ORCHESTRATOR` continua definindo o padrão inicial por compatibilidade.
+- `aif status` passa a recuperar o orquestrador salvo e mostra a sintaxe certa:
+  `/planejar`/`/revisar` ou `$planejar`/`$revisar`.
 
 ## 1.1.0 — 2026-09-05
 

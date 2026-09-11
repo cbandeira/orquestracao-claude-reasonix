@@ -6,11 +6,12 @@
 # branch ai/<slug>, worktree ../.ai-flow-worktrees/<projeto>/<slug>, artefatos
 # em .ai/.
 #
-# O orquestrador (quem planeja e revisa) pode ser o Claude Code ou o OpenCode:
-# os dois leem o mesmo prompt, cada um do seu diretório. Veja AIF_ORCHESTRATOR.
+# O orquestrador (quem planeja e revisa) pode ser Claude Code, Codex ou
+# OpenCode. Os três leem o mesmo prompt canônico. A escolha é feita no open e
+# guardada só no estado da tarefa.
 #
 #   aif install <projeto>    copia o pacote para um projeto (--force atualiza)
-#   aif open "<descrição>"   cria branch + worktree + esqueleto do contrato
+#   aif open "<descrição>"   pergunta o orquestrador e cria branch + worktree
 #   aif cd                   imprime o caminho da worktree (use: cd "$(aif cd)")
 #   aif status               o semáforo: onde estamos e qual o próximo passo
 #   aif verify               valida .ai/review.json sem commitar
@@ -23,7 +24,7 @@
 #   AIF_BRANCH_PREFIX  (padrão: ai)
 #   AIF_WORKTREE_DIR   (padrão: ../.ai-flow-worktrees)
 #   AIF_COMMIT_PREFIX  (padrão: feat)
-#   AIF_ORCHESTRATOR   (padrão: claude — ou opencode)
+#   AIF_ORCHESTRATOR   (padrão da seleção: claude, codex ou opencode)
 
 set -euo pipefail
 
@@ -32,27 +33,72 @@ set -euo pipefail
 # Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
 # MINOR acrescenta comando ou campo, PATCH corrige comportamento.
 # O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
-AIF_VERSION="1.1.0"
+AIF_VERSION="1.2.0"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
 COMMIT_PREFIX="${AIF_COMMIT_PREFIX:-feat}"
 MAX_SLUG=60
 
-# Só muda o que o aif imprime: qual GUI ele manda você abrir e com que nome a
-# chama. Nada da validação depende disso — os dois orquestradores escrevem os
-# mesmos .ai/current-task.md e .ai/review.json.
-case "${AIF_ORCHESTRATOR:-claude}" in
-  claude)   ORCH_NAME="Claude Code"; ORCH_CMD="claude" ;;
-  opencode) ORCH_NAME="OpenCode";    ORCH_CMD="opencode" ;;
-  *)        ORCH_NAME="${AIF_ORCHESTRATOR}"; ORCH_CMD="${AIF_ORCHESTRATOR}" ;;
-esac
-
 bold=$'\033[1m'; dim=$'\033[2m'; red=$'\033[31m'; grn=$'\033[32m'
 ylw=$'\033[33m'; cyn=$'\033[36m'; rst=$'\033[0m'
 [ -t 1 ] || { bold=""; dim=""; red=""; grn=""; ylw=""; cyn=""; rst=""; }
 
 die() { printf '%saif: %s%s\n' "$red" "$*" "$rst" >&2; exit 1; }
+
+# A escolha vive no processo do aif e no current.json da tarefa. Um processo
+# filho não consegue exportar variáveis para o shell pai; guardar no estado dá
+# o efeito desejado sem tocar em .bashrc e ainda funciona em outro terminal.
+set_orchestrator() {
+  case "$1" in
+    claude)
+      ORCH_NAME="Claude Code"; ORCH_CMD="claude"
+      ORCH_PLAN="/planejar"; ORCH_REVIEW="/revisar"
+      ;;
+    codex)
+      ORCH_NAME="Codex"
+      ORCH_CMD="codex -c 'default_permissions=\"aif-orchestrator\"'"
+      ORCH_PLAN='$planejar'; ORCH_REVIEW='$revisar'
+      ;;
+    opencode)
+      ORCH_NAME="OpenCode"; ORCH_CMD="opencode"
+      ORCH_PLAN="/planejar"; ORCH_REVIEW="/revisar"
+      ;;
+    *) return 1 ;;
+  esac
+  ORCHESTRATOR="$1"
+  AIF_ORCHESTRATOR="$1"
+  export AIF_ORCHESTRATOR
+}
+
+set_orchestrator "${AIF_ORCHESTRATOR:-claude}" \
+  || die "AIF_ORCHESTRATOR inválido: ${AIF_ORCHESTRATOR:-}. Use claude, codex ou opencode."
+
+choose_orchestrator() {
+  local default_num a
+  case "$ORCHESTRATOR" in
+    claude) default_num=1 ;;
+    codex) default_num=2 ;;
+    opencode) default_num=3 ;;
+  esac
+
+  printf '\n%sQual orquestrador será usado nesta tarefa?%s\n\n' "$bold" "$rst"
+  printf '  %s1%s  Claude Code\n' "$bold" "$rst"
+  printf '  %s2%s  Codex\n' "$bold" "$rst"
+  printf '  %s3%s  OpenCode\n\n' "$bold" "$rst"
+  while :; do
+    printf 'escolha [%s]: ' "$default_num"
+    if ! IFS= read -r a; then a="$default_num"; fi
+    [ -n "$a" ] || a="$default_num"
+    case "$a" in
+      1|claude|"Claude Code"|"claude code") set_orchestrator claude; break ;;
+      2|codex|Codex) set_orchestrator codex; break ;;
+      3|opencode|OpenCode) set_orchestrator opencode; break ;;
+      *) printf '%sopção inválida; use 1, 2 ou 3.%s\n' "$red" "$rst" ;;
+    esac
+  done
+  printf '%s✓%s orquestrador desta tarefa: %s\n\n' "$grn" "$rst" "$ORCH_NAME"
+}
 
 # Sempre a worktree principal, mesmo quando chamado de dentro de uma worktree de
 # tarefa: --show-toplevel devolveria a worktree, e o estado (.aif/) mora só no
@@ -102,6 +148,12 @@ read_state() {
   # Estados antigos não têm estes campos; o .get mantém a compatibilidade.
   BASE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("base_branch") or "")' "$f")"
   ACCEPTED="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("accepted") or "")' "$f")"
+  local saved_orchestrator
+  saved_orchestrator="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("orchestrator") or "")' "$f")"
+  if [ -n "$saved_orchestrator" ]; then
+    set_orchestrator "$saved_orchestrator" \
+      || die "orquestrador inválido no estado da tarefa: $saved_orchestrator"
+  fi
   [ -n "$BASE" ] || BASE="$(base_branch)"
   [ -d "$WORKTREE" ] || die "a worktree sumiu: $WORKTREE"
 }
@@ -218,10 +270,15 @@ cmd_install() {
   local f
   for f in .claude/commands/planejar.md .claude/commands/revisar.md \
            .claude/settings.json .ai/implementer.md REASONIX.md \
+           .agents/skills/planejar/SKILL.md \
+           .agents/skills/revisar/SKILL.md \
+           .codex/config.toml .codex/hooks.json .codex/hooks/aif-notify.sh \
            .opencode/agents/planejador.md .opencode/agents/revisor.md \
            .opencode/commands/planejar.md .opencode/commands/revisar.md; do
     [ -f "$src/$f" ] || die "$src não parece a raiz do pacote (falta $f). Use --from."
   done
+  [ -x "$src/.codex/hooks/aif-notify.sh" ] \
+    || die "$src não parece a raiz do pacote (.codex/hooks/aif-notify.sh não é executável)."
   [ "$src" != "$dest" ] || die "origem e destino são o mesmo diretório"
 
   git -C "$dest" rev-parse --show-toplevel >/dev/null 2>&1 \
@@ -230,7 +287,9 @@ cmd_install() {
   printf '\n%sinstalando em%s %s %s(aif %s)%s\n\n' \
     "$bold" "$rst" "$dest" "$dim" "$AIF_VERSION" "$rst"
   mkdir -p "$dest/.claude/commands" "$dest/.ai" \
-           "$dest/.opencode/commands" "$dest/.opencode/agents"
+           "$dest/.opencode/commands" "$dest/.opencode/agents" \
+           "$dest/.agents/skills/planejar" "$dest/.agents/skills/revisar" \
+           "$dest/.codex/hooks"
 
   # Sem --force, quem já existe no destino ganha: um settings.json do projeto
   # vale mais que o do pacote, e o mesmo vale para um REASONIX.md que você já
@@ -271,6 +330,8 @@ cmd_install() {
       printf '  %s!%s %-32s symlink quebrado (alvo %s sumiu)\n' \
         "$ylw" "$rst" "$2" "$1"
       kept=$((kept + 1))
+    elif [ -L "$dest/$2" ] && [ "$(readlink "$dest/$2")" = "$1" ]; then
+      printf '  %s✓%s %-32s já atualizado\n' "$grn" "$rst" "$2"
     elif [ -e "$dest/$2" ]; then
       printf '  %s—%s %-32s já existe, mantido\n' "$ylw" "$rst" "$2"
       kept=$((kept + 1))
@@ -285,6 +346,9 @@ cmd_install() {
 
   copy_keep .claude/commands/planejar.md .claude/commands/planejar.md
   copy_keep .claude/commands/revisar.md  .claude/commands/revisar.md
+  copy_keep .agents/skills/planejar/SKILL.md .agents/skills/planejar/SKILL.md
+  copy_keep .agents/skills/revisar/SKILL.md  .agents/skills/revisar/SKILL.md
+  copy_keep .codex/hooks/aif-notify.sh .codex/hooks/aif-notify.sh
   copy_keep .ai/implementer.md           .ai/implementer.md
   copy_keep REASONIX.md                  REASONIX.md
   copy_keep .opencode/agents/planejador.md .opencode/agents/planejador.md
@@ -295,6 +359,8 @@ cmd_install() {
             .claude/commands/revisar.md
 
   install_settings
+  install_codex_config
+  install_codex_hooks
   printf '\n'
 
   if [ "$updated" -gt 0 ]; then
@@ -315,7 +381,7 @@ cmd_install() {
   printf '     (roda da raiz, termina sozinho, código de saída confiável)\n'
   printf '  2. commitar — a worktree só enxerga o que está commitado:\n\n'
   printf '     cd "%s"\n' "$dest"
-  printf '     git add REASONIX.md .ai .claude .opencode && git status --short\n\n'
+  printf '     git add REASONIX.md .ai .claude .agents .codex .opencode && git status --short\n\n'
   printf '  3. desabilitar as skills de review do Reasonix — ele não tem o plano\n'
   printf '     nem o contrato, e duplica o que o /revisar já faz com os dois em mãos:\n\n'
   printf '     %s~/.reasonix/config.toml%s → [skills] disabled_skills = ["review",\n' \
@@ -332,10 +398,140 @@ cmd_install() {
     "$dim" "$rst"
   printf '     %smodelo a continuar ou revisar além do escopo do plano.%s\n\n' \
     "$dim" "$rst"
-  printf '  %sO .opencode/ é inerte se você só usa o Claude Code — e vice-versa.%s\n' \
+  printf '  %sAs pastas de cada orquestrador são inertes para os outros dois.%s\n' \
     "$dim" "$rst"
-  printf '  %sPara o aif falar do OpenCode: export AIF_ORCHESTRATOR=opencode%s\n\n' \
-    "$dim" "$rst"
+  printf '  %sO aif open perguntará qual deles usar em cada nova tarefa.%s\n\n' "$dim" "$rst"
+}
+
+# O perfil tem nome próprio e não vira padrão do projeto: o comando sugerido
+# pelo open o ativa só na sessão de Codex daquela tarefa. Se já houver um
+# config.toml, acrescentamos apenas o perfil; configuração do projeto é
+# preservada. Um perfil homônimo existente sempre ganha.
+install_codex_config() {
+  local pkg="$src/.codex/config.toml"
+  local tgt="$dest/.codex/config.toml"
+  local label=".codex/config.toml"
+  if [ ! -e "$tgt" ]; then
+    cp "$pkg" "$tgt"
+    printf '  %s✓%s %-32s copiado\n' "$grn" "$rst" "$label"
+  elif diff -q "$pkg" "$tgt" >/dev/null 2>&1; then
+    printf '  %s✓%s %-32s já atualizado\n' "$grn" "$rst" "$label"
+  elif grep -Eq '^[[:space:]]*\[permissions\.aif-orchestrator(\]|[.])' "$tgt"; then
+    if [ "$force" = "1" ]; then
+      cp "$tgt" "$tgt.bak"
+      python3 - "$pkg" "$tgt" <<'PY'
+import re, sys
+src_path, dst_path = sys.argv[1:3]
+prefix = "permissions.aif-orchestrator"
+src = open(src_path, encoding="utf-8").read()
+marker = "[permissions.aif-orchestrator]"
+profile = src[src.index(marker):].strip()
+
+kept = []
+skip = False
+for line in open(dst_path, encoding="utf-8"):
+    match = re.match(r"\s*\[([^]]+)\]", line)
+    if match:
+        section = match.group(1).strip()
+        skip = section == prefix or section.startswith(prefix + ".")
+    if not skip:
+        kept.append(line)
+
+body = "".join(kept).rstrip()
+with open(dst_path, "w", encoding="utf-8") as out:
+    if body:
+        out.write(body + "\n\n")
+    out.write(profile + "\n")
+PY
+      printf '  %s↻%s %-32s perfil atualizado %s(backup em %s.bak)%s\n' \
+        "$grn" "$rst" "$label" "$dim" "$label" "$rst"
+      updated=$((updated + 1))
+    else
+      printf '  %s—%s %-32s perfil aif-orchestrator já existe, mantido\n' \
+        "$ylw" "$rst" "$label"
+      kept=$((kept + 1))
+    fi
+  else
+    printf '\n' >> "$tgt"
+    sed -n '/^\[permissions\.aif-orchestrator\]/,$p' "$pkg" >> "$tgt"
+    printf '  %s✓%s %-32s perfil aif-orchestrator mesclado\n' "$grn" "$rst" "$label"
+  fi
+}
+
+# Hooks do Codex são JSON de projeto como os do Claude, mas vivem em arquivo
+# próprio. A mesclagem é aditiva e idempotente para não apagar hooks existentes.
+install_codex_hooks() {
+  local pkg="$src/.codex/hooks.json"
+  local tgt="$dest/.codex/hooks.json"
+  local label=".codex/hooks.json" result
+  if [ ! -e "$tgt" ]; then
+    cp "$pkg" "$tgt"
+    printf '  %s✓%s %-32s copiado\n' "$grn" "$rst" "$label"
+    return
+  fi
+  result="$(python3 - "$pkg" "$tgt" <<'PY'
+import json, sys
+src_path, dst_path = sys.argv[1:3]
+try:
+    src = json.load(open(src_path, encoding="utf-8"))
+    dst = json.load(open(dst_path, encoding="utf-8"))
+except Exception as exc:
+    print(f"ERRO:JSON inválido ({exc})")
+    raise SystemExit
+if not isinstance(dst, dict):
+    print("ERRO:a raiz existente não é um objeto")
+    raise SystemExit
+
+def key(value):
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+added = []
+dst_hooks = dst.setdefault("hooks", {})
+if not isinstance(dst_hooks, dict):
+    print("ERRO:a chave hooks existente não é um objeto")
+    raise SystemExit
+
+# Remove a notificação inline criada por versões experimentais/migrações. O
+# comando estável agora aponta para um script atualizável sem duplicar hooks.
+legacy_fragments = (
+    'notify-send -u normal "Claude Code" "Terminou — confira o handoff"',
+    'notify-send -u normal "Codex" "Terminou — confira o handoff"',
+)
+for event, blocks in list(dst_hooks.items()):
+    if not isinstance(blocks, list):
+        continue
+    cleaned = []
+    for block in blocks:
+        commands = [hook.get("command", "")
+                    for hook in block.get("hooks", [])
+                    if isinstance(hook, dict)] if isinstance(block, dict) else []
+        if any(fragment in command for command in commands
+               for fragment in legacy_fragments):
+            continue
+        cleaned.append(block)
+    dst_hooks[event] = cleaned
+for event, blocks in src.get("hooks", {}).items():
+    current = dst_hooks.setdefault(event, [])
+    if not isinstance(current, list):
+        print(f"ERRO:hooks.{event} existente não é uma lista")
+        raise SystemExit
+    seen = {key(item) for item in current}
+    for block in blocks:
+        if key(block) not in seen:
+            current.append(block)
+            seen.add(key(block))
+            added.append(event)
+with open(dst_path, "w", encoding="utf-8") as out:
+    json.dump(dst, out, ensure_ascii=False, indent=2)
+    out.write("\n")
+print("OK:" + (", ".join(sorted(set(added))) if added else "já presente"))
+PY
+)"
+  case "$result" in
+    OK:já\ presente) printf '  %s✓%s %-32s já atualizado\n' "$grn" "$rst" "$label" ;;
+    OK:*) printf '  %s✓%s %-32s hooks %s mesclados\n' "$grn" "$rst" "$label" "${result#OK:}" ;;
+    *) printf '  %s!%s %-32s não alterado: %s\n' "$ylw" "$rst" "$label" "${result#ERRO:}"; kept=$((kept + 1)) ;;
+  esac
 }
 
 # Onde a statusline e os hooks do pacote já estão, se é que estão. O Claude Code
@@ -484,7 +680,7 @@ PY
 # O 'git worktree add' materializa a branch base, então a worktree recebe só o
 # que está commitado nela. Arquivo do pacote que ficou de fora simplesmente não
 # existe lá dentro, e o sintoma aparece longe da causa: o orquestrador abre e
-# não encontra o /planejar. Aviso antes de criar, porque depois o conserto é
+# não encontra o comando de planejar. Aviso antes de criar, porque depois o conserto é
 # refazer a tarefa.
 #
 # O .ai/implementer.md e o .ai/decisions.md não entram na checagem: esses o
@@ -492,7 +688,7 @@ PY
 # sem commit.
 warn_uncommitted_package() {
   local root="$1" base="$2" p faltando=""
-  for p in .claude/commands .opencode REASONIX.md; do
+  for p in .claude/commands .agents/skills .codex .opencode REASONIX.md; do
     [ -e "$root/$p" ] || continue
     if [ -z "$(git -C "$root" ls-tree -r --name-only "$base" -- "$p" 2>/dev/null)" ]; then
       faltando="$faltando
@@ -508,7 +704,7 @@ warn_uncommitted_package() {
   printf '   A worktree é um checkout de %s: o que não está commitado lá não\n' "$base"
   printf '   aparece dentro dela, e o orquestrador abre sem os comandos.\n\n'
   printf '   Cancele com Ctrl-C, commite, e rode o open de novo:\n\n'
-  printf '     %sgit -C "%s" add .claude .opencode REASONIX.md && git -C "%s" commit%s\n\n' \
+  printf '     %sgit -C "%s" add .claude .agents .codex .opencode REASONIX.md && git -C "%s" commit%s\n\n' \
     "$bold" "$root" "$root" "$rst"
   printf '   continuar assim mesmo? [s/N] '
   local a; read -r a
@@ -516,7 +712,20 @@ warn_uncommitted_package() {
 }
 
 cmd_open() {
-  [ $# -ge 1 ] && [ -n "${1:-}" ] || die "uso: aif open \"<descrição da tarefa>\""
+  local requested_orchestrator="" desc=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --orchestrator)
+        requested_orchestrator="${2:-}"
+        [ -n "$requested_orchestrator" ] || die "--orchestrator exige claude, codex ou opencode"
+        shift 2
+        ;;
+      --orchestrator=*) requested_orchestrator="${1#*=}"; shift ;;
+      -*) die "opção desconhecida: $1" ;;
+      *) [ -z "$desc" ] || die "a descrição deve ser um único argumento entre aspas"; desc="$1"; shift ;;
+    esac
+  done
+  [ -n "$desc" ] || die "uso: aif open [--orchestrator <nome>] \"<descrição da tarefa>\""
   local root; root="$(repo_root)"
   git -C "$root" rev-parse HEAD >/dev/null 2>&1 \
     || die "o repositório não tem commits ainda; faça o commit inicial primeiro"
@@ -526,7 +735,14 @@ cmd_open() {
       && die "a tarefa '$SLUG' foi aceita mas não integrada. Integre com 'aif land' ou descarte com 'aif drop'."
     die "a tarefa '$SLUG' ainda está ativa. Finalize com 'aif accept' ou descarte com 'aif drop'."
   fi
-  local desc="$1" slug branch base wt
+  if [ -n "$requested_orchestrator" ]; then
+    set_orchestrator "$requested_orchestrator" \
+      || die "orquestrador inválido: $requested_orchestrator. Use claude, codex ou opencode."
+    printf '\n%s✓%s orquestrador desta tarefa: %s\n\n' "$grn" "$rst" "$ORCH_NAME"
+  else
+    choose_orchestrator
+  fi
+  local slug branch base wt
   slug="$(make_slug "$desc")"
   branch="$BRANCH_PREFIX/$slug"
   base="$(base_branch)"
@@ -552,19 +768,22 @@ cmd_open() {
   for ign in ".aif/" ".ai/current-task.md" ".ai/review.json" ".reasonix/"; do
     grep -qsxF "$ign" "$root/.gitignore" 2>/dev/null || echo "$ign" >> "$root/.gitignore"
   done
-  python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" <<'PY'
+  python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" "$ORCHESTRATOR" <<'PY'
 import json, sys
-f, slug, branch, wt, desc, base = sys.argv[1:7]
+f, slug, branch, wt, desc, base, orchestrator = sys.argv[1:8]
 json.dump({"slug": slug, "branch": branch, "worktree": wt,
-           "description": desc, "base_branch": base},
+           "description": desc, "base_branch": base,
+           "orchestrator": orchestrator},
           open(f, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
   printf '%s✓ tarefa aberta%s\n' "$grn" "$rst"
   printf '  branch    %s (base: %s)\n' "$branch" "$base"
+  printf '  orquestrador  %s\n' "$ORCH_NAME"
   printf '  worktree  %s\n\n' "$wt"
   printf '%sPróximo passo:%s abra os dois agentes na worktree e planeje.\n\n' "$bold" "$rst"
   printf '    cd "%s"\n' "$wt"
-  printf '    %-15s %s# depois: /planejar %s%s\n' "$ORCH_CMD" "$dim" "$desc" "$rst"
+  printf '    %s\n' "$ORCH_CMD"
+  printf '    %s%s %s%s\n' "$dim" "$ORCH_PLAN" "$desc" "$rst"
 }
 
 cmd_cd() { read_state; printf '%s\n' "$WORKTREE"; }
@@ -574,7 +793,8 @@ cmd_status() {
   local p r
   p="$(plan_state)"; r="$(review_state)"
   printf '\n%s%s%s  %s\n' "$bold" "$SLUG" "$rst" "$DESCRIPTION"
-  printf '%sbranch %s · worktree %s%s\n\n' "$dim" "$BRANCH" "$WORKTREE" "$rst"
+  printf '%sbranch %s · orquestrador %s · worktree %s%s\n\n' \
+    "$dim" "$BRANCH" "$ORCH_NAME" "$WORKTREE" "$rst"
 
   if [ -n "$ACCEPTED" ]; then
     printf '  aceita       %s✓ commitada em %s%s\n' "$grn" "$ACCEPTED" "$rst"
@@ -604,13 +824,13 @@ cmd_status() {
 
   printf '\n%s→ próximo passo:%s ' "$bold" "$rst"
   if [ "$p" != "ok" ]; then
-    printf 'no %s%s%s, dentro da worktree: %s/planejar %s%s\n\n' \
-      "$cyn" "$ORCH_NAME" "$rst" "$bold" "$DESCRIPTION" "$rst"
+    printf 'no %s%s%s, dentro da worktree: %s%s %s%s\n\n' \
+      "$cyn" "$ORCH_NAME" "$rst" "$bold" "$ORCH_PLAN" "$DESCRIPTION" "$rst"
   elif ! has_code_changes; then
     printf 'no %sReasonix%s: cole o bloco /goal que o %s imprimiu.\n\n' \
       "$cyn" "$rst" "$ORCH_NAME"
   elif [ "$r" = "missing" ]; then
-    printf 'no %s%s%s: %s/revisar%s\n\n' "$cyn" "$ORCH_NAME" "$rst" "$bold" "$rst"
+    printf 'no %s%s%s: %s%s%s\n\n' "$cyn" "$ORCH_NAME" "$rst" "$bold" "$ORCH_REVIEW" "$rst"
   else
     case "$r" in
       approved:*) printf 'rode %saif accept%s para commitar.\n\n' "$bold" "$rst" ;;
