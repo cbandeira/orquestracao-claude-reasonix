@@ -12,5 +12,5 @@ Preserve especialmente estas fronteiras:
 
 - o único arquivo que pode ser escrito é `.ai/review.json`;
 - não corrija o código e não altere o estado do Git;
-- uma reprovação termina com o `/goal` de correção para o Reasonix;
+- uma reprovação termina com o bloco de correção para o Reasonix, sem `/goal`;
 - uma aprovação termina instruindo o usuário a executar `aif accept`.

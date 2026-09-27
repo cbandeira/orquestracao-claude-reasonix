@@ -16,6 +16,47 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.3.0 — 2026-09-27
+
+- O handoff para o Reasonix deixa de usar `/goal`. No Reasonix, Goal não tem
+  limite padrão de rodadas, turnos, tempo nem de rodadas sem progresso, e já
+  prendeu o worker em loop. `/planejar` e `/revisar` agora imprimem uma linha de
+  status e, dentro de um bloco de código, só o que se cola: o request, as
+  restrições próprias do plano e a linha `PRONTO → devolva ao orquestrador.`
+  Sem linhas de moldura e sem repetir as regras permanentes, que o worker já
+  recebe do `REASONIX.md`. Ver ADR-0006.
+- `aif install` mescla no `reasonix.toml` da raiz do projeto regras
+  `[permissions] deny` para `git commit`, `push`, `merge`, `rebase`, `reset`,
+  qualquer `aif` e escrita em `.ai/review.json`. O "Não faça, nunca" do
+  `REASONIX.md` passa a ser aplicado pelo Reasonix em qualquer modo de
+  permissão, inclusive Full access. A mescla é por chave: um arquivo que o
+  próprio Reasonix escreveu, só com `allow`, ganha o que falta e mantém o
+  resto; uma chave já existente só é trocada com `--force`, com backup `.bak`.
+  O `install` avisa quando a config global tem regras `deny`, porque o `deny`
+  do projeto as substitui.
+- O mesmo arquivo liga `[skills] disable_implicit_invocation = true`, que
+  impede o modelo de invocar skills sozinho — inclusive os
+  `planejar`/`revisar` de `.agents/skills/`, que o Reasonix também enxerga. O
+  item do checklist que mandava desabilitar as skills de review na config
+  global sai.
+- O `reasonix.toml` passa a ser tratado como estado local, como o `.reasonix/`:
+  o Reasonix grava nele cada "Always allow", com caminho absoluto. O `install`
+  e o `open` o põem no `.gitignore`, o `open` o copia para dentro da worktree,
+  o `accept` nunca o commita e o `status` não o conta como mudança de código.
+  Antes, um "Always allow" dado pelo worker podia entrar no commit da tarefa.
+- `aif install` avisa quando o `.gitignore` do projeto cobre arquivos do
+  pacote (um `.agents/`, por exemplo), e, depois de um `--force`, lembra de
+  tirar os `*.bak` do stage.
+- O checklist do `install` acompanha a barra atual do Reasonix: no **+**, não
+  selecionar Goal nem Plan (fica Normal); permissão em Workspace access, não
+  Full access. Saem as menções a Standard, Auto, YOLO e Delivery.
+- `aif status` diz "em modo Normal: cole o bloco" em vez de "cole o bloco
+  /goal".
+
+Para receber os prompts novos num projeto já instalado, rode
+`aif install --force` e reaplique o comando de testes a partir de
+`REASONIX.md.bak`.
+
 ## 1.2.0 — 2026-09-11
 
 - Codex passa a ser um orquestrador de primeira classe, com Skills `$planejar`

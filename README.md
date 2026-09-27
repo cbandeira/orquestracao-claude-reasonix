@@ -29,7 +29,8 @@ aif install /caminho/do/seu/projeto
 ```
 
 Depois ajuste o comando de testes em `REASONIX.md` e commite — a worktree só
-enxerga o que está commitado.
+enxerga o que está commitado. No Reasonix, deixe o modo em Normal (nada de Goal
+ou Plan no **+**) e a permissão em **Workspace access**.
 
 Dependências: `git`, `bash` e `python3`. Roda em Linux e macOS: não usa nada de
 bash 4+ nem ferramenta cujo comportamento mude entre GNU e BSD. No macOS, o
@@ -45,7 +46,7 @@ cd "$(aif cd)"
 | Passo | Quem | O quê |
 |---|---|---|
 | 1 | orquestrador | `/planejar <tarefa>` ou `$planejar <tarefa>` → escreve `.ai/current-task.md` |
-| 2 | worker | cola o bloco `/goal` → implementa e roda os testes |
+| 2 | worker | cola o bloco do orquestrador, em modo Normal → implementa e roda os testes |
 | 3 | orquestrador | `/revisar` ou `$revisar` → escreve `.ai/review.json` |
 | 4 | você | `aif accept` → valida o veredito e commita |
 | 5 | você | testa de verdade, depois `aif land` → mescla e limpa |
@@ -76,7 +77,9 @@ Claude Code e Codex têm notificações; a statusline do pacote é exclusiva do
 Claude Code.
 
 O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
-`.ai/current-task.md` e nunca commita.
+`.ai/current-task.md` e nunca commita: o `reasonix.toml` local, que o
+`aif open` copia para a worktree, barra commit, push, merge e `aif` com regras
+`deny`, que valem em qualquer modo de permissão.
 
 ## Arquivos
 
@@ -89,6 +92,7 @@ O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
 | `.opencode/` | symlinks para os mesmos prompts + as travas de ferramenta |
 | `.ai/implementer.md` | contrato permanente do worker |
 | `REASONIX.md` | o que o Reasonix carrega ao abrir a worktree |
+| `reasonix.toml` | regras `deny` do worker e skills só por `/skill` — local, fora do git |
 | `.claude/settings.json` | statusline e notificações (Claude Code) |
 | `ARQUITETURA.md` | componentes, limites, estado e fluxo do sistema |
 | `docs/adr/` | decisões arquiteturais e suas justificativas |

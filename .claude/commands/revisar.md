@@ -84,33 +84,27 @@ ficam em inglês; `summary`, `description` e `recommendation` em português.
 
 ### Se reprovou
 
-Imprima — e nada além disso:
+Imprima — e nada além disso — a linha de status e o bloco de código abaixo. O
+usuário copia o bloco inteiro para o Reasonix: sem `/goal`, sem linhas de
+moldura. As regras permanentes do worker já chegam a ele pelo `REASONIX.md`;
+não as repita.
 
-```
-────────────────────────────────────────────────────────────
-REPROVADO (<n> bloqueantes) → mande o worker corrigir. Cole no Reasonix:
-────────────────────────────────────────────────────────────
-/goal Context:
-A revisão do trabalho anterior reprovou. O veredito completo está em
-.ai/review.json e o contrato original em .ai/current-task.md.
+````
+REPROVADO (<n> bloqueantes) → mande o worker corrigir. Cole no Reasonix, em modo Normal:
 
-Request:
+```text
 Corrija todas as questões CRITICAL, HIGH e MEDIUM de .ai/review.json.
-
-Output format:
-Para cada questão, diga em uma linha o que mudou. Depois rode os testes e
-encerre com a linha exata: PRONTO → devolva ao orquestrador.
+O contrato original continua em .ai/current-task.md.
 
 Constraints:
 Não trate as questões LOW agora.
 Não refatore nada fora do escopo das correções.
-Não commite, não faça push, não edite .ai/review.json.
+Se uma correção exigir mudar o plano, pare e diga por quê.
 
-Pause policy:
-Se uma correção exigir mudar o plano, pare e diga por quê, em vez de improvisar
-um plano diferente.
-────────────────────────────────────────────────────────────
+Para cada questão, diga em uma linha o que mudou. Rode os testes e encerre com
+a linha exata: PRONTO → devolva ao orquestrador.
 ```
+````
 
 ### Se aprovou
 

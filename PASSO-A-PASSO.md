@@ -33,6 +33,7 @@ o Reasonix.
 | `.claude/settings.json` | raiz do projeto | statusline com tokens + notificações — **mesclar, não sobrescrever** |
 | `.ai/implementer.md` | raiz do projeto | contrato permanente do worker |
 | `REASONIX.md` | raiz do projeto | instruções que o Reasonix carrega sozinho |
+| `reasonix.toml` | raiz do projeto, **fora do git** | config local do Reasonix: `deny` para commit/merge/`aif` e skills só por `/skill` |
 
 O corpo de cada comando é **um só**. O Claude Code lê `.claude/commands/`, o
 OpenCode chega ao mesmo arquivo por `.opencode/commands/`, e as Skills do Codex
@@ -96,6 +97,35 @@ Se já existir `.codex/config.toml`, o instalador acrescenta somente o perfil
 O perfil não vira padrão do projeto: o comando que o `open` imprime o ativa
 somente naquela sessão do Codex.
 
+O `reasonix.toml` é diferente dos outros: é estado local, como o `.reasonix/`,
+e fica fora do git. O Reasonix o lê por cima de `~/.reasonix/config.toml` e
+**também escreve nele** — cada "Always allow" que você clica vira uma regra
+`allow` ali, com caminho absoluto, e o arquivo é criado se não existir.
+Commitado, ele sujaria o diff de toda tarefa. Por isso o `install` o põe no
+`.gitignore` (e avisa se ele já estiver commitado), o `aif open` o copia da raiz
+para dentro de cada worktree, como faz com o `.ai/implementer.md`, e o
+`aif accept` nunca o commita. O do pacote traz duas chaves:
+
+- `[permissions] deny` barra `git commit`, `push`, `merge`, `rebase`, `reset`,
+  qualquer `aif` e escrita em `.ai/review.json`. É o "Não faça, nunca" do
+  `REASONIX.md` aplicado pela ferramenta, não só pedido ao modelo: `deny` vence
+  em qualquer modo de permissão, inclusive Full access, e é checado em cada
+  trecho de um comando composto.
+- `[skills] disable_implicit_invocation = true` impede o modelo de descobrir e
+  invocar skills sozinho — você ainda as chama com `/skill`. Isso tira do worker
+  as skills de review embutidas do Reasonix, que duplicariam o `/revisar` sem ter
+  o plano, e também os `planejar`/`revisar` de `.agents/skills/`: o Reasonix
+  varre `.agents/` e `.claude/` do projeto atrás de skills e comandos.
+
+Se o projeto já tiver um `reasonix.toml` — o caso comum é um que o próprio
+Reasonix escreveu, só com `allow` —, o `install` acrescenta o `deny` e o
+`disable_implicit_invocation` que faltam e não mexe no resto. Uma dessas chaves
+que já exista fica como está, com aviso; com `--force`, ele troca só o valor
+dela e guarda o arquivo anterior em `.bak`. Atenção a um detalhe do Reasonix: listas não se somam entre
+arquivos. O `deny` do projeto **substitui** o da config global dentro dele; se
+você mantém regras `deny` lá, o `install` avisa e você as copia para o
+`reasonix.toml`.
+
 O `.claude/settings.json` tem tratamento à parte, porque é o único do pacote
 que costuma disputar espaço com algo que já existe. Um projeto que já usa
 Claude Code guarda as permissões dele nesse arquivo, e copiar por cima apaga
@@ -134,14 +164,22 @@ Depois **ajuste duas coisas**:
 Por fim, **commite**. Não é zelo, é requisito: o `aif open` monta a worktree com
 `git worktree add`, então ela contém só o que está commitado na branch base. O
 `.ai/implementer.md` e o `.ai/decisions.md` o `aif` copia à mão para dentro da
-worktree, e por isso sobrevivem sem commit; o `REASONIX.md`, o
-`.claude/commands/`, `.agents/`, `.codex/` e `.opencode/` não — sem commit, a
+worktree, e por isso sobrevivem sem commit — e o `reasonix.toml` também, que
+nem deve ser commitado; o `REASONIX.md`, o `.claude/commands/`, `.agents/`,
+`.codex/` e `.opencode/` não — sem commit, a
 worktree abre sem as instruções e o comando de planejar não aparece no
 orquestrador.
 
 ```bash
-cd /caminho/do/seu/projeto && git add REASONIX.md .ai .claude .agents .codex .opencode && git status --short
+cd /caminho/do/seu/projeto && git add REASONIX.md .ai .claude .agents .codex .opencode; git status --short
 ```
+
+Se você rodou o `install` com `--force`, os `*.bak` que ele deixou ao lado dos
+arquivos atualizados entram junto no `git add`. Eles não são do projeto: tire-os
+do stage com `git reset -q -- '*.bak'` antes de commitar. E se o `.gitignore` do
+projeto cobrir alguma pasta do pacote — um `.agents/`, por exemplo —, o
+`git add` reclama dela; o `install` avisa quando isso acontece, porque um
+arquivo novo ali nunca chegaria à worktree.
 
 Leia esse `git status` antes de commitar. Tudo que veio do pacote é arquivo
 novo, e arquivo novo aparece como `A`. Um `M` ali significa que algo do projeto
@@ -270,8 +308,8 @@ No Codex:
 $planejar Adicionar rate limiting no endpoint de login
 ```
 
-Ele lê o código, escreve `.ai/current-task.md` e termina imprimindo um bloco
-`/goal ...` pronto. **Leia o plano antes de seguir** — é o momento mais barato
+Ele lê o código, escreve `.ai/current-task.md` e termina imprimindo uma linha
+de status e um bloco pronto para colar no Reasonix. **Leia o plano antes de seguir** — é o momento mais barato
 de corrigir rumo. Editar o `current-task.md` à mão é uso previsto; o validador
 só exige que as seções `## Plan` e `## Acceptance criteria` continuem lá, com
 esses nomes em inglês.
@@ -284,9 +322,36 @@ aif status
 
 ## 6. Implementar (Reasonix)
 
-Copie o bloco que o orquestrador imprimiu e cole no Reasonix. É um *task
-contract* no formato que ele espera: contexto, request, formato de saída,
-restrições e política de pausa.
+Antes de colar, confira a barra do Reasonix:
+
+- no **+**, não selecione Goal nem Plan — sem nada selecionado, o modo é Normal;
+- na permissão, **Workspace access**, não Full access nem Read only.
+
+Depois copie o bloco que o orquestrador imprimiu — só o que está dentro do
+bloco de código — e cole no Reasonix. É um *task contract* enxuto: o request, as
+restrições próprias do plano e a linha de encerramento. O resto — não commitar,
+ficar dentro de `Files`, formato do relatório, quando pausar — o worker já
+recebe do `REASONIX.md`, que o Reasonix carrega sozinho a cada turno.
+
+Por que não Goal: no Reasonix, Goal não tem limite padrão de rodadas, turnos,
+tempo nem de rodadas sem progresso. Ele segue até o próprio modelo julgar a
+tarefa concluída ou travada — e já prendeu o worker em loop. Em modo Normal, o
+turno acaba quando o worker reporta, e o `.ai/implementer.md` limita a 3 as
+tentativas de consertar um teste vermelho. Se um dia você usar Goal mesmo
+assim, ponha um teto na config global:
+
+```toml
+# ~/.reasonix/config.toml
+[agent]
+goal_token_budget = 20000000
+```
+
+Plan também fica de fora: ele faz o Reasonix escrever e confirmar um plano
+próprio, e o plano desta tarefa já existe e foi lido por você.
+
+Por que Workspace access: Full access pula a aprovação de ferramenta, e aí a
+única trava que sobra é o `deny` do `reasonix.toml`. Read only não deixa o
+worker escrever.
 
 Deixe rodando. Ele lê `REASONIX.md` → `.ai/implementer.md` → `.ai/current-task.md`,
 implementa, roda os testes e encerra com:
@@ -315,7 +380,7 @@ $revisar
 Ele lê o diff contra o plano, escreve `.ai/review.json` e termina de um dos
 dois jeitos:
 
-- **REPROVADO** — imprime um bloco `/goal` de correção. Cola no Reasonix, volta
+- **REPROVADO** — imprime um bloco de correção. Cola no Reasonix, volta
   ao passo 6. O worker vai tratar só o que é `CRITICAL`, `HIGH` e `MEDIUM`.
 - **APROVADO** — manda você rodar `aif accept`.
 
@@ -406,10 +471,11 @@ qualquer das duas montagens do passo 3. O `.codex/hooks.json` fornece ao Codex
 uma notificação `Stop` equivalente, sem a statusline de custo/tokens.
 
 No lado do Reasonix, o app desktop já mostra o loop de ferramentas, as
-aprovações e os checkpoints por turno. Como você vai estar olhando, use o modo
-de aprovação interativo em vez de `--permission-mode auto`: leitura, escrita e
-shell pedem separadamente, e o sandbox da workspace ainda limita o alcance.
-É uma postura melhor do que a do modo automático, não pior.
+aprovações e os checkpoints por turno. Workspace access aprova sozinho o
+trabalho comum dentro da worktree, e o que importa continua travado: o `deny`
+do `reasonix.toml` barra commit, merge e `aif` em qualquer modo, e o sandbox
+limita a escrita à worktree. Na CLI, o equivalente é
+`reasonix --permission-mode auto`.
 
 ---
 
@@ -422,7 +488,7 @@ aif status
 | Estado | Próximo passo |
 |---|---|
 | plano ausente ou inválido | orquestrador: `/planejar` ou `$planejar` |
-| plano ok, sem mudanças de código | Reasonix: cole o bloco `/goal` |
+| plano ok, sem mudanças de código | Reasonix, modo Normal: cole o bloco do worker |
 | mudanças de código, sem revisão | orquestrador: `/revisar` ou `$revisar` |
 | revisão exige mudanças | Reasonix: cole o bloco de correção |
 | revisão aprovada | `aif accept` |

@@ -73,35 +73,34 @@ validador o rejeita.
 
 ## Saída obrigatória — parte 2: o handoff na tela
 
-Depois de escrever o arquivo, imprima no chat — e **nada além disso** — o bloco
-abaixo, preenchido. É o que o usuário vai copiar para o Reasonix.
+Depois de escrever o arquivo, imprima no chat — e **nada além disso** — a
+linha de status e o bloco de código abaixo, preenchidos. O usuário copia o
+bloco inteiro para o Reasonix, então dentro dele vai só o que o worker precisa
+ler: sem `/goal`, sem linhas de moldura, sem comentários seus.
 
-```
-────────────────────────────────────────────────────────────
-PRONTO → mande o worker executar. Cole no Reasonix:
-────────────────────────────────────────────────────────────
-/goal Context:
-Estou trabalhando em <nome do projeto>, na worktree desta sessão.
-O contrato completo está em .ai/current-task.md. Leia-o primeiro.
+````
+PRONTO → mande o worker executar. Cole no Reasonix, em modo Normal:
+
+```text
+Execute o contrato em .ai/current-task.md.
 
 Request:
 <uma frase: a ação única que o worker deve completar>
 
-Output format:
-Ao terminar, liste os arquivos alterados e o resultado do comando de testes.
-Encerre com a linha exata: PRONTO → devolva ao orquestrador.
-
 Constraints:
 <as restrições da seção Constraints do plano, uma por linha>
-Não commite, não faça push, não altere a branch base.
-Não edite .ai/review.json.
-Não saia do escopo listado na seção Files.
 
-Pause policy:
-Salvo operação irreversível, mudança de escopo ou informação que só eu posso
-dar, siga até implementar e verificar antes de reportar.
-────────────────────────────────────────────────────────────
+Encerre com a linha exata: PRONTO → devolva ao orquestrador.
 ```
+````
+
+O bloco é curto de propósito. O Reasonix carrega sozinho o `REASONIX.md` do
+projeto, que o manda ler `.ai/implementer.md`: as regras permanentes — não
+commitar, não editar `.ai/review.json`, ficar dentro de `Files`, formato do
+relatório, política de pausa — já chegam ao worker por lá. Não as repita.
+
+Nunca use `/goal`: no Reasonix, Goal não tem limite de rodadas e continua até
+ele mesmo julgar a tarefa concluída — já prendeu o worker em loop.
 
 Não resuma o plano de novo no chat, não ofereça implementar, não pergunte se
 pode continuar. Seu turno acaba nesse bloco.

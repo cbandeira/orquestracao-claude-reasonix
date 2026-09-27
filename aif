@@ -33,7 +33,7 @@ set -euo pipefail
 # Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
 # MINOR acrescenta comando ou campo, PATCH corrige comportamento.
 # O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
-AIF_VERSION="1.2.0"
+AIF_VERSION="1.3.0"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
@@ -229,9 +229,9 @@ PY
 
 has_code_changes() {
   local n
-  n="$(git -C "$WORKTREE" status --porcelain -- . ':(exclude).ai' | wc -l)"
+  n="$(git -C "$WORKTREE" status --porcelain -- . ':(exclude).ai' ':(exclude).reasonix' ':(exclude)reasonix.toml' | wc -l)"
   local c
-  c="$(git -C "$WORKTREE" diff --name-only "$(base_branch)...HEAD" -- . ':(exclude).ai' 2>/dev/null | wc -l || echo 0)"
+  c="$(git -C "$WORKTREE" diff --name-only "$(base_branch)...HEAD" -- . ':(exclude).ai' ':(exclude).reasonix' ':(exclude)reasonix.toml' 2>/dev/null | wc -l || echo 0)"
   [ "$n" -gt 0 ] || [ "$c" -gt 0 ]
 }
 
@@ -269,7 +269,7 @@ cmd_install() {
   src="$(cd "$src" && pwd)"
   local f
   for f in .claude/commands/planejar.md .claude/commands/revisar.md \
-           .claude/settings.json .ai/implementer.md REASONIX.md \
+           .claude/settings.json .ai/implementer.md REASONIX.md reasonix.toml \
            .agents/skills/planejar/SKILL.md \
            .agents/skills/revisar/SKILL.md \
            .codex/config.toml .codex/hooks.json .codex/hooks/aif-notify.sh \
@@ -359,6 +359,7 @@ cmd_install() {
             .claude/commands/revisar.md
 
   install_settings
+  install_reasonix_config
   install_codex_config
   install_codex_hooks
   printf '\n'
@@ -376,31 +377,211 @@ cmd_install() {
       "$dim" "$bold" "$rst" "$dim" "$rst"
   fi
 
-  printf '%sFalta você:%s\n\n' "$bold" "$rst"
+  warn_ignored_package
+  printf '\n%sFalta você:%s\n\n' "$bold" "$rst"
   printf '  1. ajustar o comando de testes na última seção de %sREASONIX.md%s\n' "$bold" "$rst"
   printf '     (roda da raiz, termina sozinho, código de saída confiável)\n'
   printf '  2. commitar — a worktree só enxerga o que está commitado:\n\n'
   printf '     cd "%s"\n' "$dest"
-  printf '     git add REASONIX.md .ai .claude .agents .codex .opencode && git status --short\n\n'
-  printf '  3. desabilitar as skills de review do Reasonix — ele não tem o plano\n'
-  printf '     nem o contrato, e duplica o que o /revisar já faz com os dois em mãos:\n\n'
-  printf '     %s~/.reasonix/config.toml%s → [skills] disabled_skills = ["review",\n' \
+  printf '     git add REASONIX.md .ai .claude .agents .codex .opencode; git status --short\n\n'
+  if [ "$updated" -gt 0 ]; then
+    printf '     %sos *.bak do --force não são do projeto; tire-os do stage antes do commit:%s\n' \
+      "$dim" "$rst"
+    printf "     git reset -q -- '*.bak'\n\n"
+  fi
+  printf '  3. na barra do Reasonix: no %s+%s, não selecione Goal nem Plan (fica Normal);\n' \
     "$bold" "$rst"
-  printf '     "review-bugbot", "review-security", "security-review"]\n\n'
-  printf '  4. na barra do Reasonix: execução em %sStandard%s (não Goal), aprovação\n' \
+  printf '     na permissão, use %sWorkspace access%s (não Full access).\n\n' \
     "$bold" "$rst"
-  printf '     de ferramenta em %sAuto%s (não YOLO); perfil de trabalho em Standard\n' \
-    "$bold" "$rst"
-  printf '     já é o certo — evite Delivery.\n\n'
-  printf '     %sYOLO desliga a aprovação de ferramenta inteira: o "não faça nunca"%s\n' \
+  printf '     %sGoal não tem limite de rodadas e já prendeu o worker em loop; Plan%s\n' \
     "$dim" "$rst"
-  printf '     %sdo REASONIX.md vira pedido sem trava. Goal e Delivery empurram o%s\n' \
+  printf '     %sreplaneja o que o orquestrador já planejou. Full access desliga a%s\n' \
     "$dim" "$rst"
-  printf '     %smodelo a continuar ou revisar além do escopo do plano.%s\n\n' \
+  printf '     %saprovação de ferramenta: sobra só o deny do reasonix.toml.%s\n\n' \
     "$dim" "$rst"
+  if global_reasonix_deny; then
+    printf '  %s!  sua config global do Reasonix tem regras deny. Listas não se somam:%s\n' \
+      "$ylw" "$rst"
+    printf '  %s   o deny do reasonix.toml as substitui neste projeto. Copie-as para lá.%s\n\n' \
+      "$ylw" "$rst"
+  fi
   printf '  %sAs pastas de cada orquestrador são inertes para os outros dois.%s\n' \
     "$dim" "$rst"
   printf '  %sO aif open perguntará qual deles usar em cada nova tarefa.%s\n\n' "$dim" "$rst"
+}
+
+# O reasonix.toml é estado local, como o .reasonix/: o Reasonix grava nele cada
+# "Always allow", com caminho absoluto, e o cria se não existir. Por isso fica
+# fora do git, e o 'open' o copia para dentro de cada worktree. A mescla é por
+# chave, não por seção, porque o arquivo típico que já existe foi o próprio
+# Reasonix que escreveu, com um [permissions] só de allow: acrescentamos o deny
+# e o disable_implicit_invocation que faltam e não tocamos no resto. Uma chave
+# que já existe fica, salvo --force, que troca só o valor dela e guarda o
+# arquivo anterior em .bak.
+install_reasonix_config() {
+  local pkg="$src/reasonix.toml"
+  local tgt="$dest/reasonix.toml"
+  local label="reasonix.toml" result
+  if [ ! -e "$tgt" ]; then
+    cp "$pkg" "$tgt"
+    printf '  %s✓%s %-32s copiado\n' "$grn" "$rst" "$label"
+  elif diff -q "$pkg" "$tgt" >/dev/null 2>&1; then
+    printf '  %s✓%s %-32s já atualizado\n' "$grn" "$rst" "$label"
+  else
+    [ "$force" = "1" ] && cp "$tgt" "$tgt.bak"
+    result="$(python3 - "$pkg" "$tgt" "$force" <<'PY'
+import re, sys
+pkg_path, tgt_path, force = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+pkg = open(pkg_path, encoding="utf-8").read().splitlines()
+lines = open(tgt_path, encoding="utf-8").read().splitlines()
+
+def value_end(block, i):
+    """Índice da última linha do valor que começa em block[i] (arrays multilinha)."""
+    depth, quote = 0, None
+    j = i
+    while j < len(block):
+        text = block[j] if j > i else block[j].split("=", 1)[1]
+        k = 0
+        while k < len(text):
+            c = text[k]
+            if quote:
+                if c == "\\" and quote == '"':
+                    k += 1
+                elif c == quote:
+                    quote = None
+            elif c in "\"'":
+                quote = c
+            elif c == "#":
+                break
+            elif c == "[":
+                depth += 1
+            elif c == "]":
+                depth -= 1
+            k += 1
+        if depth <= 0:
+            return j
+        j += 1
+    return len(block) - 1
+
+def section_range(block, name):
+    start = None
+    for idx, line in enumerate(block):
+        m = re.match(r"\s*\[([^]]+)\]\s*(#.*)?$", line)
+        if m:
+            if start is not None:
+                return start, idx
+            if m.group(1).strip() == name:
+                start = idx
+    return (start, len(block)) if start is not None else (None, None)
+
+def key_at(block, lo, hi, key):
+    for idx in range(lo + 1, hi):
+        if re.match(r"\s*" + re.escape(key) + r"\s*=", block[idx]):
+            return idx
+    return None
+
+def pkg_value(section, key):
+    lo, hi = section_range(pkg, section)
+    i = key_at(pkg, lo, hi, key)
+    return pkg[i:value_end(pkg, i) + 1]
+
+report = []
+for section, key in (("permissions", "deny"), ("skills", "disable_implicit_invocation")):
+    value = pkg_value(section, key)
+    lo, hi = section_range(lines, section)
+    if lo is None:
+        if key == "deny":
+            value = ["# aif: trava do worker. Substitui o deny global neste projeto."] + value
+        lines += ["", "[" + section + "]"] + value
+        report.append(key + ":added")
+        continue
+    i = key_at(lines, lo, hi, key)
+    if i is None:
+        if key == "deny":
+            value = ["# aif: trava do worker. Substitui o deny global neste projeto."] + value
+        lines[lo + 1:lo + 1] = value
+        report.append(key + ":added")
+    elif force:
+        lines[i:value_end(lines, i) + 1] = value
+        report.append(key + ":replaced")
+    else:
+        report.append(key + ":kept")
+
+open(tgt_path, "w", encoding="utf-8").write("\n".join(lines).rstrip() + "\n")
+print(" ".join(report))
+PY
+)"
+    local item added="" replaced="" same=""
+    for item in $result; do
+      case "$item" in
+        *:added)    added="$added ${item%:*}" ;;
+        *:replaced) replaced="$replaced ${item%:*}" ;;
+        *:kept)     same="$same ${item%:*}" ;;
+      esac
+    done
+    if [ -n "$added" ]; then
+      printf '  %s✓%s %-32s mesclado:%s\n' "$grn" "$rst" "$label" "$added"
+    fi
+    if [ -n "$replaced" ]; then
+      printf '  %s↻%s %-32s atualizado:%s %s(backup em %s.bak)%s\n' \
+        "$grn" "$rst" "$label" "$replaced" "$dim" "$label" "$rst"
+      updated=$((updated + 1))
+    elif [ "$force" = "1" ]; then
+      rm -f "$tgt.bak"
+    fi
+    if [ -n "$same" ]; then
+      printf '  %s—%s %-32s já define%s, mantido\n' "$ylw" "$rst" "$label" "$same"
+      printf '     %scompare com o pacote; --force troca só esses valores%s\n' "$dim" "$rst"
+      kept=$((kept + 1))
+    fi
+  fi
+  # Estado local não entra no histórico: fica no .gitignore, e um arquivo que
+  # alguém já commitou precisa sair do índice.
+  if git -C "$dest" rev-parse --show-toplevel >/dev/null 2>&1; then
+    grep -qsxF 'reasonix.toml' "$dest/.gitignore" \
+      || { echo 'reasonix.toml' >> "$dest/.gitignore"
+           printf '  %s✓%s .gitignore: reasonix.toml ignorado\n' "$grn" "$rst"; }
+    if git -C "$dest" ls-files --error-unmatch reasonix.toml >/dev/null 2>&1; then
+      printf '  %s!%s reasonix.toml está commitado; o Reasonix grava nele. Tire do índice:\n' \
+        "$ylw" "$rst"
+      printf '     %sgit -C "%s" rm --cached reasonix.toml%s\n' "$dim" "$dest" "$rst"
+    fi
+  fi
+}
+
+# Um .gitignore do projeto que cubra um arquivo do pacote faz o 'git add' do
+# checklist falhar, e a worktree nasce sem o arquivo novo. Checa o padrão, não
+# o índice (--no-index), porque arquivo já rastreado não aparece como ignorado.
+warn_ignored_package() {
+  git -C "$dest" rev-parse --show-toplevel >/dev/null 2>&1 || return 0
+  local p hits=""
+  for p in REASONIX.md .ai/implementer.md \
+           .claude/commands/planejar.md .claude/commands/revisar.md \
+           .agents/skills/planejar/SKILL.md .agents/skills/revisar/SKILL.md \
+           .codex/config.toml .codex/hooks.json .codex/hooks/aif-notify.sh \
+           .opencode/commands/planejar.md .opencode/commands/revisar.md \
+           .opencode/agents/planejador.md .opencode/agents/revisor.md; do
+    git -C "$dest" check-ignore -q --no-index -- "$p" && hits="$hits $p"
+  done
+  [ -n "$hits" ] || return 0
+  printf '\n  %s!%s o .gitignore do projeto cobre arquivos do pacote:\n' "$ylw" "$rst"
+  for p in $hits; do
+    printf '     %s  %s\n' "$p" "$(git -C "$dest" check-ignore -v --no-index -- "$p" | cut -f1)"
+  done
+  printf '     %so git add abaixo reclama deles, e arquivo novo ali não chega à worktree.%s\n' \
+    "$dim" "$rst"
+}
+
+# Verdadeiro se a config global do Reasonix define uma lista deny não vazia
+# em [permissions]. Heurística de linha: basta para decidir se vale avisar.
+global_reasonix_deny() {
+  local cfg="${REASONIX_HOME:-$HOME/.reasonix}/config.toml"
+  [ -f "$cfg" ] || return 1
+  awk '
+    /^[[:space:]]*\[/ { in_perm = ($0 ~ /^[[:space:]]*\[permissions\][[:space:]]*(#.*)?$/) }
+    in_perm && /^[[:space:]]*deny[[:space:]]*=/ && !/=[[:space:]]*\[[[:space:]]*\]/ { found = 1 }
+    END { exit !found }
+  ' "$cfg"
 }
 
 # O perfil tem nome próprio e não vira padrão do projeto: o comando sugerido
@@ -762,10 +943,14 @@ cmd_open() {
   mkdir -p "$wt/.ai"
   [ -f "$root/.ai/decisions.md" ] && cp "$root/.ai/decisions.md" "$wt/.ai/decisions.md" || true
   [ -f "$root/.ai/implementer.md" ] && cp "$root/.ai/implementer.md" "$wt/.ai/implementer.md" || true
+  # As travas do worker (deny, skills) vivem no reasonix.toml, que é local e
+  # ignorado — o Reasonix grava nele cada "Always allow". Sem esta cópia a
+  # worktree nasceria sem elas.
+  [ -f "$root/reasonix.toml" ] && cp "$root/reasonix.toml" "$wt/reasonix.toml" || true
 
   mkdir -p "$root/.aif"
   local ign
-  for ign in ".aif/" ".ai/current-task.md" ".ai/review.json" ".reasonix/"; do
+  for ign in ".aif/" ".ai/current-task.md" ".ai/review.json" ".reasonix/" "reasonix.toml"; do
     grep -qsxF "$ign" "$root/.gitignore" 2>/dev/null || echo "$ign" >> "$root/.gitignore"
   done
   python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" "$ORCHESTRATOR" <<'PY'
@@ -827,14 +1012,14 @@ cmd_status() {
     printf 'no %s%s%s, dentro da worktree: %s%s %s%s\n\n' \
       "$cyn" "$ORCH_NAME" "$rst" "$bold" "$ORCH_PLAN" "$DESCRIPTION" "$rst"
   elif ! has_code_changes; then
-    printf 'no %sReasonix%s: cole o bloco /goal que o %s imprimiu.\n\n' \
+    printf 'no %sReasonix%s, em modo Normal: cole o bloco que o %s imprimiu.\n\n' \
       "$cyn" "$rst" "$ORCH_NAME"
   elif [ "$r" = "missing" ]; then
     printf 'no %s%s%s: %s%s%s\n\n' "$cyn" "$ORCH_NAME" "$rst" "$bold" "$ORCH_REVIEW" "$rst"
   else
     case "$r" in
       approved:*) printf 'rode %saif accept%s para commitar.\n\n' "$bold" "$rst" ;;
-      changes:*)  printf 'no %sReasonix%s: cole o bloco de correção que o %s imprimiu.\n\n' \
+      changes:*)  printf 'no %sReasonix%s, em modo Normal: cole o bloco de correção que o %s imprimiu.\n\n' \
                     "$cyn" "$rst" "$ORCH_NAME" ;;
       *)          printf 'o %s.ai/review.json%s está inválido; peça ao %s para reescrevê-lo.\n\n' \
                     "$bold" "$rst" "$ORCH_NAME" ;;
@@ -862,13 +1047,15 @@ cmd_accept() {
   # seguinte nascer com o plano e o `approved` da anterior — e um review.json
   # de outra tarefa abre este mesmo portão por engano. O .reasonix/ é estado
   # local do app do worker (títulos de tópico, timestamps): não pertence ao
-  # histórico do projeto, e o worker o escreve dentro da worktree.
+  # histórico do projeto, e o worker o escreve dentro da worktree. O
+  # reasonix.toml também: o 'open' o copia para cá e o Reasonix grava nele cada
+  # "Always allow", com caminho absoluto.
   # Nada de ':(exclude)' aqui: um pathspec de exclusão faz o git tratar esses
   # caminhos como nomeados à mão e recusar o add inteiro quando eles estão no
   # .gitignore — que é justamente onde 'aif open' os põe. Adiciona tudo e
-  # tira os três do índice depois, o que vale nos dois casos.
+  # tira os quatro do índice depois, o que vale nos dois casos.
   git -C "$WORKTREE" add -A -- .
-  git -C "$WORKTREE" reset -q -- .ai/current-task.md .ai/review.json .reasonix
+  git -C "$WORKTREE" reset -q -- .ai/current-task.md .ai/review.json .reasonix reasonix.toml
   git -C "$WORKTREE" commit -q -m "$COMMIT_PREFIX: $DESCRIPTION"
   local sha; sha="$(git -C "$WORKTREE" rev-parse --short HEAD)"
   mark_accepted "$sha"

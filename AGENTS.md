@@ -7,7 +7,8 @@ file is the executable Bash CLI and the primary implementation. `README.md`
 is the concise overview; `PASSO-A-PASSO.md` explains the full operational
 flow; `ARQUITETURA.md` describes the current architecture; `docs/adr/` records
 architectural decisions; and `CHANGELOG.md` records releases. `REASONIX.md` and
-`.ai/implementer.md` define the worker contract. Agent prompts live in
+`.ai/implementer.md` define the worker contract, and `reasonix.toml` enforces
+its prohibitions as Reasonix `deny` rules. Agent prompts live in
 `.claude/commands/`; `.opencode/commands/` and `.opencode/agents/` provide the
 OpenCode integration, while `.agents/skills/` and `.codex/` provide the Codex
 integration. Keep matching behavior aligned across all three orchestrators.
@@ -42,7 +43,7 @@ Python 3 only where Bash would make JSON handling unsafe or unclear.
 
 Run the relevant manual lifecycle after changing validation or Git behavior.
 `aif accept` must revalidate `.ai/review.json` and must not commit
-`.ai/current-task.md`, `.ai/review.json`, or `.reasonix/`. These files are
+`.ai/current-task.md`, `.ai/review.json`, `.reasonix/`, or `reasonix.toml`. These files are
 per-worktree runtime state, not package history. Keep `REASONIX.md`'s test
 command as an editable template for installed projects.
 

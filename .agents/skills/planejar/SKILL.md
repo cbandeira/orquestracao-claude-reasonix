@@ -16,4 +16,5 @@ Preserve especialmente estas fronteiras:
 
 - o único arquivo que pode ser escrito é `.ai/current-task.md`;
 - código-fonte e estado do Git são somente leitura;
-- o resultado final na tela é o bloco `/goal` para o Reasonix.
+- o resultado final na tela é a linha de status e o bloco para colar no
+  Reasonix, sem `/goal`.
