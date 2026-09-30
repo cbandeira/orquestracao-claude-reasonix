@@ -1,6 +1,6 @@
 ---
 name: planejar
-description: Planeja uma tarefa do fluxo aif e escreve o contrato que será implementado pelo Reasonix. Use dentro de uma worktree aberta por `aif open`.
+description: Planeja uma tarefa do fluxo aif e escreve o contrato que será implementado pelo worker (Reasonix ou Claude Code). Use dentro de uma worktree aberta por `aif open`.
 ---
 
 # Planejar uma tarefa do aif
@@ -17,4 +17,4 @@ Preserve especialmente estas fronteiras:
 - o único arquivo que pode ser escrito é `.ai/current-task.md`;
 - código-fonte e estado do Git são somente leitura;
 - o resultado final na tela é a linha de status e o bloco para colar no
-  Reasonix, sem `/goal`.
+  worker, sem `/goal`.

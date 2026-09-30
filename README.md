@@ -46,7 +46,7 @@ cd "$(aif cd)"
 | Passo | Quem | O quê |
 |---|---|---|
 | 1 | orquestrador | `/planejar <tarefa>` ou `$planejar <tarefa>` → escreve `.ai/current-task.md` |
-| 2 | worker | cola o bloco do orquestrador, em modo Normal → implementa e roda os testes |
+| 2 | worker | cola o bloco do orquestrador → implementa e roda os testes |
 | 3 | orquestrador | `/revisar` ou `$revisar` → escreve `.ai/review.json` |
 | 4 | você | `aif accept` → valida o veredito e commita |
 | 5 | você | testa de verdade, depois `aif land` → mescla e limpa |
@@ -76,10 +76,23 @@ revisor só escreve o veredito, e o estado do Git permanece somente leitura.
 Claude Code e Codex têm notificações; a statusline do pacote é exclusiva do
 Claude Code.
 
-O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
-`.ai/current-task.md` e nunca commita: o `reasonix.toml` local, que o
-`aif open` copia para a worktree, barra commit, push, merge e `aif` com regras
-`deny`, que valem em qualquer modo de permissão.
+## Os dois workers
+
+O `aif open` também pergunta quem implementa. Os dois leem `REASONIX.md` →
+`.ai/implementer.md` → `.ai/current-task.md`, recebem o mesmo bloco e nunca
+commitam:
+
+- **Reasonix + DeepSeek** (padrão): em modo Normal. O `reasonix.toml` local,
+  que o `aif open` copia para a worktree, barra commit, push, merge e `aif`
+  com regras `deny`.
+- **Claude Code + Sonnet**: numa segunda sessão do Claude, aberta com o
+  comando que o `aif` imprime. As mesmas regras `deny` vêm de
+  `.claude/aif-worker.json`, carregado só nessa sessão.
+
+Nos dois, as regras valem em qualquer modo de permissão. O worker Claude não
+custa nada além da assinatura, mas gasta a mesma cota do orquestrador. O
+Reasonix custa pouco e poupa essa cota. Para automação:
+`aif open --worker claude "<tarefa>"`.
 
 ## Arquivos
 
@@ -91,8 +104,9 @@ O worker é o **Reasonix**, que lê `REASONIX.md` → `.ai/implementer.md` →
 | `.codex/` | perfil de escrita restrito a `.ai/` e notificação do Codex |
 | `.opencode/` | symlinks para os mesmos prompts + as travas de ferramenta |
 | `.ai/implementer.md` | contrato permanente do worker |
-| `REASONIX.md` | o que o Reasonix carrega ao abrir a worktree |
-| `reasonix.toml` | regras `deny` do worker e skills só por `/skill` — local, fora do git |
+| `REASONIX.md` | contrato de entrada do worker: o Reasonix o carrega sozinho, o Claude pelo system prompt |
+| `reasonix.toml` | regras `deny` do Reasonix e skills só por `/skill` — local, fora do git |
+| `.claude/aif-worker.json` | regras `deny` do worker Claude Code, carregadas só na sessão dele |
 | `.claude/settings.json` | statusline e notificações (Claude Code) |
 | `ARQUITETURA.md` | componentes, limites, estado e fluxo do sistema |
 | `docs/adr/` | decisões arquiteturais e suas justificativas |
