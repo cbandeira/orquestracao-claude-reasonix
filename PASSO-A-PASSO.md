@@ -99,10 +99,14 @@ O perfil não vira padrão do projeto: o comando que o `open` imprime o ativa
 somente naquela sessão do Codex.
 
 O `reasonix.toml` é diferente dos outros: é estado local, como o `.reasonix/`,
-e fica fora do git. O Reasonix o lê por cima de `~/.reasonix/config.toml` e
-**também escreve nele** — cada "Always allow" que você clica vira uma regra
-`allow` ali, com caminho absoluto, e o arquivo é criado se não existir.
-Commitado, ele sujaria o diff de toda tarefa. Por isso o `install` o põe no
+e fica fora do git. O Reasonix o lê por cima de `~/.reasonix/config.toml` e,
+até a v1.39.4, **também escreve nele** — cada "Always allow" que você clica
+vira uma regra `allow` ali, com caminho absoluto, e o arquivo é criado se não
+existir. Commitado, ele sujaria o diff de toda tarefa. A partir da v1.39.5, o
+Reasonix grava esses "Always allow" em `~/.reasonix/project-grants.json`, por
+pasta, e ignora `mode` e `allow` de um arquivo de projeto: o `reasonix.toml`
+só pode restringir. O `aif` o mantém fora do git do mesmo jeito, porque as
+versões anteriores continuam gravando nele. Por isso o `install` o põe no
 `.gitignore` (e avisa se ele já estiver commitado), o `aif open` o copia da raiz
 para dentro de cada worktree, como faz com o `.ai/implementer.md`, e o
 `aif accept` nunca o commita. O do pacote traz duas chaves:
@@ -111,7 +115,13 @@ para dentro de cada worktree, como faz com o `.ai/implementer.md`, e o
   qualquer `aif` e escrita em `.ai/review.json`. É o "Não faça, nunca" do
   `REASONIX.md` aplicado pela ferramenta, não só pedido ao modelo: `deny` vence
   em qualquer modo de permissão, inclusive Full access, e é checado em cada
-  trecho de um comando composto.
+  trecho de um comando composto. Uma regra como `git commit:*` compara as
+  palavras iniciais do comando e deixaria passar `git -c user.name=x commit`,
+  `git -C . commit` ou `git --no-pager commit`. Por isso cada subcomando tem
+  também `git * commit` e `git * commit ?*`, que o Reasonix lê como curinga.
+  O `?*` exige um espaço depois do subcomando, e um arquivo como
+  `commit_notes.txt` não é barrado. O efeito colateral é raro:
+  `git log --grep commit` também é barrado, e `--grep=commit` passa.
 - `[skills] disable_implicit_invocation = true` impede o modelo de descobrir e
   invocar skills sozinho — você ainda as chama com `/skill`. Isso tira do worker
   as skills de review embutidas do Reasonix, que duplicariam o `/revisar` sem ter
@@ -122,10 +132,15 @@ Se o projeto já tiver um `reasonix.toml` — o caso comum é um que o próprio
 Reasonix escreveu, só com `allow` —, o `install` acrescenta o `deny` e o
 `disable_implicit_invocation` que faltam e não mexe no resto. Uma dessas chaves
 que já exista fica como está, com aviso; com `--force`, ele troca só o valor
-dela e guarda o arquivo anterior em `.bak`. Atenção a um detalhe do Reasonix: listas não se somam entre
-arquivos. O `deny` do projeto **substitui** o da config global dentro dele; se
-você mantém regras `deny` lá, o `install` avisa e você as copia para o
-`reasonix.toml`.
+dela e guarda o arquivo anterior em `.bak`. Um projeto instalado antes da
+versão 1.4.1 do pacote mantém o `deny` antigo, sem os curingas: rode
+`aif install --force` para trocá-lo.
+
+Atenção a um detalhe que depende da versão do Reasonix. Até a v1.39.4, listas
+não se somam entre arquivos: o `deny` do projeto **substitui** o da config
+global dentro dele. Se você mantém regras `deny` lá, o `install` avisa, e você
+as copia para o `reasonix.toml`. A partir da v1.39.5, as duas listas se somam,
+e o `install` não avisa quando encontra essa versão no `PATH`.
 
 O `.claude/settings.json` tem tratamento à parte, porque é o único do pacote
 que costuma disputar espaço com algo que já existe. Um projeto que já usa

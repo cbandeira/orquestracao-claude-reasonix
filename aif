@@ -37,7 +37,7 @@ set -euo pipefail
 # Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
 # MINOR acrescenta comando ou campo, PATCH corrige comportamento.
 # O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
-AIF_VERSION="1.4.0"
+AIF_VERSION="1.4.1"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
@@ -456,10 +456,12 @@ cmd_install() {
     "$dim" "$rst"
   printf '     %saprovação de ferramenta: sobra só o deny do reasonix.toml.%s\n\n' \
     "$dim" "$rst"
-  if global_reasonix_deny; then
-    printf '  %s!  sua config global do Reasonix tem regras deny. Listas não se somam:%s\n' \
+  if global_reasonix_deny && ! reasonix_sums_deny; then
+    printf '  %s!  sua config global do Reasonix tem regras deny. Antes da v1.39.5, o%s\n' \
       "$ylw" "$rst"
-    printf '  %s   o deny do reasonix.toml as substitui neste projeto. Copie-as para lá.%s\n\n' \
+    printf '  %s   deny do reasonix.toml as substitui neste projeto: copie-as para lá ou%s\n' \
+      "$ylw" "$rst"
+    printf '  %s   atualize o Reasonix, que a partir dessa versão soma as duas listas.%s\n\n' \
       "$ylw" "$rst"
   fi
   printf '  %sAs pastas de cada orquestrador são inertes para os outros dois.%s\n' \
@@ -471,8 +473,9 @@ cmd_install() {
   printf '  %sque carrega as travas de .claude/aif-worker.json.%s\n\n' "$dim" "$rst"
 }
 
-# O reasonix.toml é estado local, como o .reasonix/: o Reasonix grava nele cada
-# "Always allow", com caminho absoluto, e o cria se não existir. Por isso fica
+# O reasonix.toml é estado local, como o .reasonix/: até a v1.39.4, o Reasonix
+# grava nele cada "Always allow", com caminho absoluto, e o cria se não existir
+# (a partir da v1.39.5, grava em ~/.reasonix/project-grants.json). Por isso fica
 # fora do git, e o 'open' o copia para dentro de cada worktree. A mescla é por
 # chave, não por seção, porque o arquivo típico que já existe foi o próprio
 # Reasonix que escreveu, com um [permissions] só de allow: acrescentamos o deny
@@ -603,7 +606,7 @@ PY
       || { echo 'reasonix.toml' >> "$dest/.gitignore"
            printf '  %s✓%s .gitignore: reasonix.toml ignorado\n' "$grn" "$rst"; }
     if git -C "$dest" ls-files --error-unmatch reasonix.toml >/dev/null 2>&1; then
-      printf '  %s!%s reasonix.toml está commitado; o Reasonix grava nele. Tire do índice:\n' \
+      printf '  %s!%s reasonix.toml está commitado; o Reasonix pode gravar nele. Tire do índice:\n' \
         "$ylw" "$rst"
       printf '     %sgit -C "%s" rm --cached reasonix.toml%s\n' "$dim" "$dest" "$rst"
     fi
@@ -631,6 +634,21 @@ warn_ignored_package() {
   done
   printf '     %so git add abaixo reclama deles, e arquivo novo ali não chega à worktree.%s\n' \
     "$dim" "$rst"
+}
+
+# Verdadeiro se o Reasonix no PATH é v1.39.5 ou mais novo. A partir dessa
+# versão, o deny do reasonix.toml do projeto se soma ao da config global; antes,
+# o substituía. Sem CLI no PATH (só o app desktop) a resposta é "não sei", e o
+# install avisa do mesmo jeito.
+reasonix_sums_deny() {
+  command -v reasonix >/dev/null 2>&1 || return 1
+  reasonix --version 2>/dev/null | awk '
+    { for (i = 1; i <= NF; i++) if ($i ~ /^v?[0-9]+\.[0-9]+\.[0-9]+/) { v = $i; break } }
+    END {
+      sub(/^v/, "", v); split(v, n, /[^0-9]+/)
+      if (v == "") exit 1
+      exit !(n[1] > 1 || (n[1] == 1 && (n[2] > 39 || (n[2] == 39 && n[3] >= 5))))
+    }'
 }
 
 # Verdadeiro se a config global do Reasonix define uma lista deny não vazia
@@ -1018,8 +1036,8 @@ cmd_open() {
   [ -f "$root/.ai/decisions.md" ] && cp "$root/.ai/decisions.md" "$wt/.ai/decisions.md" || true
   [ -f "$root/.ai/implementer.md" ] && cp "$root/.ai/implementer.md" "$wt/.ai/implementer.md" || true
   # As travas do worker (deny, skills) vivem no reasonix.toml, que é local e
-  # ignorado — o Reasonix grava nele cada "Always allow". Sem esta cópia a
-  # worktree nasceria sem elas.
+  # ignorado — até a v1.39.4, o Reasonix grava nele cada "Always allow". Sem
+  # esta cópia a worktree nasceria sem elas.
   [ -f "$root/reasonix.toml" ] && cp "$root/reasonix.toml" "$wt/reasonix.toml" || true
 
   mkdir -p "$root/.aif"
@@ -1141,9 +1159,10 @@ cmd_accept() {
   # de outra tarefa abre este mesmo portão por engano. O .reasonix/ é estado
   # local do app do worker (títulos de tópico, timestamps): não pertence ao
   # histórico do projeto, e o worker o escreve dentro da worktree. O
-  # reasonix.toml também: o 'open' o copia para cá e o Reasonix grava nele cada
-  # "Always allow", com caminho absoluto. O .claude/settings.local.json é o
-  # equivalente do Claude Code, worker ou orquestrador.
+  # reasonix.toml também: o 'open' o copia para cá e, até a v1.39.4, o Reasonix
+  # grava nele cada "Always allow", com caminho absoluto. O
+  # .claude/settings.local.json é o equivalente do Claude Code, worker ou
+  # orquestrador.
   # Nada de ':(exclude)' aqui: um pathspec de exclusão faz o git tratar esses
   # caminhos como nomeados à mão e recusar o add inteiro quando eles estão no
   # .gitignore — que é justamente onde 'aif open' os põe. Adiciona tudo e

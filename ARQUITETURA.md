@@ -1,7 +1,7 @@
 # Arquitetura do aif
 
 Este documento descreve a arquitetura vigente do framework a partir da versão
-1.4.0. O passo a passo de operação fica em `PASSO-A-PASSO.md`; as razões das
+1.4.1. O passo a passo de operação fica em `PASSO-A-PASSO.md`; as razões das
 decisões estruturais ficam nos registros em `docs/adr/`.
 
 ## Objetivo e limites
@@ -89,8 +89,11 @@ rodadas — com a permissão em Workspace access. O bloco colado traz só o requ
 e as restrições do plano; as regras permanentes chegam pelo `REASONIX.md`, que
 o Reasonix carrega sozinho. O `reasonix.toml` transforma as proibições em
 regras `deny` e impede o modelo de invocar skills por conta própria. Ele é
-estado local, fora do git — o Reasonix grava nele cada "Always allow" —, e o
-`aif open` o copia da raiz para a worktree.
+estado local, fora do git — até a v1.39.4, o Reasonix grava nele cada "Always
+allow"; a partir da v1.39.5, grava em `~/.reasonix/project-grants.json` —, e o
+`aif open` o copia da raiz para a worktree. A partir da v1.39.5, um arquivo de
+projeto só restringe: o `deny` dele se soma ao da config global, em vez de
+substituí-lo.
 
 #### Claude Code
 
@@ -197,7 +200,9 @@ papel:
   limitada a `.ai/`;
 - Reasonix recebe regras `deny` do `reasonix.toml` para commit, push, merge,
   rebase, reset, `aif` e `.ai/review.json`, válidas em qualquer modo de
-  permissão, e o sandbox dele limita a escrita à worktree;
+  permissão. Cada subcomando do Git tem também regras de curinga para as
+  variantes com opções antes dele, como `git -c … commit`. O sandbox do
+  Reasonix limita a escrita à worktree;
 - o worker Claude Code recebe as mesmas proibições como `permissions.deny` de
   `.claude/aif-worker.json` — com variantes como `git -c … commit` e mais as
   skills `planejar` e `revisar` —, válidas em qualquer modo de permissão;
@@ -245,3 +250,4 @@ implementação.
 - [ADR-0005 — Escolher o orquestrador por tarefa](docs/adr/0005-escolher-orquestrador-por-tarefa.md)
 - [ADR-0006 — Rodar o worker em modo Normal com contrato enxuto](docs/adr/0006-worker-em-modo-normal-com-contrato-enxuto.md)
 - [ADR-0007 — Escolher o worker por tarefa](docs/adr/0007-escolher-worker-por-tarefa.md)
+- [ADR-0008 — Barrar opções do Git antes do subcomando no deny do Reasonix](docs/adr/0008-barrar-opcoes-do-git-no-deny-do-reasonix.md)
