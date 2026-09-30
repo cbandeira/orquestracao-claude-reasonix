@@ -16,6 +16,27 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.4.1 — 2026-09-30
+
+- O `deny` do `reasonix.toml` deixava passar opções do Git antes do
+  subcomando: `git -c user.name=x commit`, `git -C . commit` e
+  `git --no-pager commit` criavam commits, porque `Bash(git commit:*)` compara
+  as palavras iniciais do comando. Cada subcomando proibido — `commit`,
+  `push`, `merge`, `rebase` e `reset` — ganhou as regras `Bash(git * <sub>)` e
+  `Bash(git * <sub> ?*)`. A forma `git * <sub> *` não serve no Reasonix, que lê
+  um padrão terminado em " *" como prefixo. Falso positivo conhecido:
+  `git log --grep commit` também é barrado; `--grep=commit` passa. Ver
+  ADR-0008.
+- A documentação e o `install` passam a considerar o Reasonix v1.39.5, em que
+  um arquivo de projeto só restringe: o `deny` dele se soma ao da config
+  global, e o "Always allow" é gravado em `~/.reasonix/project-grants.json`.
+  O aviso sobre regras `deny` globais só aparece quando o `install` não
+  encontra no `PATH` um Reasonix v1.39.5 ou mais novo.
+- Para receber as regras novas num projeto já instalado, rode
+  `aif install --force`: sem ele, o `deny` existente é mantido. O `--force`
+  também troca o `REASONIX.md`, então reaplique o comando de testes a partir do
+  `.bak`.
+
 ## 1.4.0 — 2026-09-30
 
 - `aif open` pergunta também o worker: **Reasonix + DeepSeek** (padrão) ou

@@ -1,5 +1,7 @@
 # Configuração do Reasonix para este projeto, instalada pelo aif. O Reasonix
-# lê este arquivo por cima de ~/.reasonix/config.toml.
+# lê este arquivo por cima de ~/.reasonix/config.toml. A partir da v1.39.5, um
+# arquivo de projeto só restringe: deny e ask se somam aos da config global, e
+# mode e allow daqui são ignorados.
 
 [permissions]
 # Trava técnica do "Não faça, nunca" do REASONIX.md. Uma regra deny vence em
@@ -8,14 +10,35 @@
 # O controle de versão é do usuário, e `aif accept`/`aif land` commitam e
 # mesclam; o veredito em .ai/review.json é do revisor.
 #
-# Listas não se somam entre arquivos: este deny SUBSTITUI o deny da sua config
-# global dentro deste projeto. Se você mantém regras deny lá, copie-as para cá.
+# `git commit:*` casa pelas palavras iniciais do comando, uma a uma, e deixa
+# passar `git -c user.name=x commit`, `git -C . commit` e `git --no-pager
+# commit` — o primeiro é o que um modelo tenta quando falta identidade no Git.
+# Por isso cada subcomando tem também duas regras de curinga: `git * commit`,
+# para o subcomando no fim, e `git * commit ?*`, que exige um espaço depois
+# dele e por isso não pega um arquivo como commit_notes.txt. A forma
+# `git * commit *` não serve: no Reasonix, um padrão que termina em " *" é
+# lido como prefixo, não como curinga. Efeito colateral raro: `git log --grep
+# commit` também é barrado; `--grep=commit` passa.
+#
+# Até a v1.39.4, listas não se somam entre arquivos: este deny SUBSTITUI o deny
+# da sua config global dentro deste projeto. Nessas versões, se você mantém
+# regras deny lá, copie-as para cá.
 deny = [
   "Bash(git commit:*)",
   "Bash(git push:*)",
   "Bash(git merge:*)",
   "Bash(git rebase:*)",
   "Bash(git reset:*)",
+  "Bash(git * commit)",
+  "Bash(git * commit ?*)",
+  "Bash(git * push)",
+  "Bash(git * push ?*)",
+  "Bash(git * merge)",
+  "Bash(git * merge ?*)",
+  "Bash(git * rebase)",
+  "Bash(git * rebase ?*)",
+  "Bash(git * reset)",
+  "Bash(git * reset ?*)",
   "Bash(aif:*)",
   "Edit(*.ai/review.json)",
 ]
