@@ -1,4 +1,4 @@
-# Loop manual orquestrador ⇄ Reasonix — passo a passo
+# Loop manual orquestrador ⇄ worker — passo a passo
 
 O `ai-flow` continua existindo e continua funcionando. O que muda aqui é quem
 dirige: os modelos rodam nas GUIs, na sua frente, e o `aif` faz o papel de
@@ -10,8 +10,8 @@ as justificativas históricas das decisões, consulte `docs/adr/`.
 
 São três papéis e dois agentes. O **orquestrador** planeja e revisa; o
 **worker** implementa; você commita e integra. O orquestrador pode ser Claude
-Code, Codex ou OpenCode — os três seguem o mesmo protocolo —, e o worker aqui é
-o Reasonix.
+Code, Codex ou OpenCode — os três seguem o mesmo protocolo. O worker pode ser o
+Reasonix, com DeepSeek, ou uma segunda sessão do Claude Code, com Sonnet.
 
 ---
 
@@ -31,8 +31,9 @@ o Reasonix.
 | `.opencode/agents/planejador.md` | raiz do projeto | as travas de ferramenta do planejador no OpenCode |
 | `.opencode/agents/revisor.md` | raiz do projeto | idem, para o revisor |
 | `.claude/settings.json` | raiz do projeto | statusline com tokens + notificações — **mesclar, não sobrescrever** |
+| `.claude/aif-worker.json` | raiz do projeto | `deny` do worker Claude Code para commit/merge/`aif`/veredito, carregado só na sessão dele |
 | `.ai/implementer.md` | raiz do projeto | contrato permanente do worker |
-| `REASONIX.md` | raiz do projeto | instruções que o Reasonix carrega sozinho |
+| `REASONIX.md` | raiz do projeto | instruções do worker: o Reasonix as carrega sozinho, o worker Claude Code as recebe no system prompt |
 | `reasonix.toml` | raiz do projeto, **fora do git** | config local do Reasonix: `deny` para commit/merge/`aif` e skills só por `/skill` |
 
 O corpo de cada comando é **um só**. O Claude Code lê `.claude/commands/`, o
@@ -222,7 +223,27 @@ para scripts, pule a pergunta explicitamente:
 aif open --orchestrator codex "Adicionar rate limiting no endpoint de login"
 ```
 
-Diferenças reais entre eles, para você escolher com os olhos abertos:
+Logo depois vem a pergunta do worker:
+
+```
+Qual worker vai implementar?
+
+  1  Reasonix + DeepSeek
+  2  Claude Code + sonnet (esforço medium)
+```
+
+O padrão é o Reasonix. Os dois cumprem o mesmo contrato, e a diferença é de
+custo e de viés. O Reasonix cobra à parte, mas pouco, e tira a parte que mais
+consome tokens da sua cota do Claude. O worker Claude Code não custa nada além
+da assinatura, mas gasta a mesma cota do orquestrador: se ele esgotar a janela
+de uso no meio da tarefa, o `/revisar` fica esperando junto. E um revisor pega
+mais erro de um autor de outra família de modelo. Use o Claude quando tiver
+folga de cota e o Reasonix nas tarefas longas. `AIF_WORKER` muda o padrão do
+menu, `--worker claude` pula a pergunta, e `AIF_WORKER_MODEL` e
+`AIF_WORKER_EFFORT` trocam o modelo e o esforço do worker Claude (padrão
+`sonnet` e `medium`). Ver ADR-0007.
+
+Diferenças reais entre os orquestradores, para você escolher com os olhos abertos:
 
 - **As travas de ferramenta.** No Claude Code elas vêm do `allowed-tools` do
   próprio comando; no OpenCode, do agente em `.opencode/agents/`. A do OpenCode
@@ -237,6 +258,10 @@ Diferenças reais entre eles, para você escolher com os olhos abertos:
   recebe notificação pelo hook `Stop`. OpenCode não lê nenhum desses arquivos.
 
 Escolhido isso, a ideia é não ter que caçar janela. Duas montagens:
+
+Com o worker Claude Code, são duas sessões do Claude na mesma pasta: abra o
+worker num terminal separado, com o comando que o `aif open` imprime (passo 6).
+Com o Reasonix:
 
 **A — tudo num VS Code só (recomendado).** Instale a extensão do orquestrador
 que você escolheu e a extensão do Reasonix (`SivanLiu.reasonix-agent`, que sobe
@@ -253,8 +278,8 @@ no Codex.
 aif open "Adicionar rate limiting no endpoint de login"
 ```
 
-Depois da seleção, o `aif` imprime o comando exato para abrir o orquestrador.
-Para Codex, será:
+Depois da seleção, o `aif` imprime o comando exato para abrir o orquestrador
+e, com o worker Claude Code, também o do worker. Para Codex, será:
 
 ```bash
 codex -c 'default_permissions="aif-orchestrator"'
@@ -309,7 +334,7 @@ $planejar Adicionar rate limiting no endpoint de login
 ```
 
 Ele lê o código, escreve `.ai/current-task.md` e termina imprimindo uma linha
-de status e um bloco pronto para colar no Reasonix. **Leia o plano antes de seguir** — é o momento mais barato
+de status e um bloco pronto para colar no worker. **Leia o plano antes de seguir** — é o momento mais barato
 de corrigir rumo. Editar o `current-task.md` à mão é uso previsto; o validador
 só exige que as seções `## Plan` e `## Acceptance criteria` continuem lá, com
 esses nomes em inglês.
@@ -320,7 +345,41 @@ Confira quando quiser:
 aif status
 ```
 
-## 6. Implementar (Reasonix)
+## 6. Implementar (worker)
+
+`aif status` diz qual worker esta tarefa usa. O bloco que o orquestrador
+imprime é o mesmo para os dois.
+
+### Com o worker Claude Code
+
+Num terminal separado, dentro da worktree, abra o worker com o comando que o
+`aif open` imprimiu — o `aif status` repete esse comando enquanto for a vez
+do worker:
+
+```bash
+claude --model sonnet --effort medium --permission-mode acceptEdits \
+  --settings .claude/aif-worker.json --append-system-prompt-file REASONIX.md
+```
+
+Cada parte tem motivo:
+
+- `--append-system-prompt-file REASONIX.md` entrega ao Claude o mesmo contrato
+  que o Reasonix lê sozinho, e ele manda ler `.ai/implementer.md`.
+- `--settings .claude/aif-worker.json` carrega as travas só nesta sessão:
+  `deny` para commit, push, merge, rebase, reset — inclusive com opções
+  antes do subcomando, como `git -c … commit` —, qualquer `aif`, escrita em
+  `.ai/review.json` e as skills `planejar` e `revisar`. Se estivessem no
+  `settings.json` do projeto, travariam também o `/revisar` de um orquestrador
+  Claude Code na mesma worktree.
+- `--permission-mode acceptEdits` deixa as edições passarem direto e pede sua
+  aprovação para comandos de shell, como os testes. Um "sempre permitir" grava
+  `.claude/settings.local.json` na worktree, que o `aif accept` nunca commita.
+
+Cole o bloco e deixe rodando. Quando o worker encerrar com `PRONTO`, volte ao
+orquestrador. Na correção de uma reprovação, cole o bloco novo na mesma
+sessão.
+
+### Com o Reasonix
 
 Antes de colar, confira a barra do Reasonix:
 
@@ -380,7 +439,7 @@ $revisar
 Ele lê o diff contra o plano, escreve `.ai/review.json` e termina de um dos
 dois jeitos:
 
-- **REPROVADO** — imprime um bloco de correção. Cola no Reasonix, volta
+- **REPROVADO** — imprime um bloco de correção. Cola no worker, volta
   ao passo 6. O worker vai tratar só o que é `CRITICAL`, `HIGH` e `MEDIUM`.
 - **APROVADO** — manda você rodar `aif accept`.
 
@@ -395,8 +454,9 @@ severidades — e aplica a regra que o `ai-flow` já aplicava: **um veredito
 `approved` que lista uma questão bloqueante vale como `changes_required`**.
 Só depois disso ele commita, na branch da tarefa. Sem push, sem merge, sem
 tocar na base. Ficam de fora do commit o `.ai/current-task.md`, o
-`.ai/review.json` e o `.reasonix/`: plano, veredito e estado local do app do
-worker são efêmeros e por worktree — commitá-los faz a tarefa seguinte nascer
+`.ai/review.json`, o `.reasonix/`, o `reasonix.toml` e o
+`.claude/settings.local.json`: plano, veredito e estado local dos apps são
+efêmeros e por worktree — commitá-los faz a tarefa seguinte nascer
 com o plano e o `approved` da anterior.
 
 Por que não deixar o orquestrador commitar sozinho? Porque foi ele que escreveu
@@ -488,9 +548,9 @@ aif status
 | Estado | Próximo passo |
 |---|---|
 | plano ausente ou inválido | orquestrador: `/planejar` ou `$planejar` |
-| plano ok, sem mudanças de código | Reasonix, modo Normal: cole o bloco do worker |
+| plano ok, sem mudanças de código | worker (Reasonix em modo Normal, ou Claude Code): cole o bloco |
 | mudanças de código, sem revisão | orquestrador: `/revisar` ou `$revisar` |
-| revisão exige mudanças | Reasonix: cole o bloco de correção |
+| revisão exige mudanças | worker: cole o bloco de correção |
 | revisão aprovada | `aif accept` |
 | aceita, integração pendente | teste de verdade, depois `aif land` |
 
@@ -499,8 +559,10 @@ Comandos completos: `install`, `open`, `cd`, `status`, `verify`, `accept`,
 
 Variáveis de ambiente: `AIF_BRANCH_PREFIX` (padrão `ai`), `AIF_WORKTREE_DIR`
 (padrão `../.ai-flow-worktrees`), `AIF_COMMIT_PREFIX` (padrão `feat`) e
-`AIF_ORCHESTRATOR` (padrão inicial `claude`; aceita `codex` e `opencode`). O
-orquestrador efetivo é escolhido e salvo por `aif open`.
+`AIF_ORCHESTRATOR` (padrão inicial `claude`; aceita `codex` e `opencode`),
+`AIF_WORKER` (padrão inicial `reasonix`; aceita `claude`), `AIF_WORKER_MODEL`
+(padrão `sonnet`) e `AIF_WORKER_EFFORT` (padrão `medium`). O orquestrador e o
+worker efetivos são escolhidos e salvos por `aif open`.
 
 Enquanto houver uma tarefa aceita e não integrada, o `aif open` recusa abrir
 outra — feche o ciclo com `land` ou `drop` primeiro.

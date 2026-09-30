@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aif -- cartório do loop manual orquestrador <-> Reasonix.
+# aif -- cartório do loop manual orquestrador <-> worker.
 #
 # Não roda modelo nenhum. Cuida do git, valida os artefatos que os agentes
 # escrevem e diz qual é o próximo passo. Convenções idênticas às do ai-flow:
@@ -7,11 +7,12 @@
 # em .ai/.
 #
 # O orquestrador (quem planeja e revisa) pode ser Claude Code, Codex ou
-# OpenCode. Os três leem o mesmo prompt canônico. A escolha é feita no open e
-# guardada só no estado da tarefa.
+# OpenCode. Os três leem o mesmo prompt canônico. O worker (quem implementa)
+# pode ser Reasonix + DeepSeek ou Claude Code + Sonnet. As duas escolhas são
+# feitas no open e guardadas só no estado da tarefa.
 #
 #   aif install <projeto>    copia o pacote para um projeto (--force atualiza)
-#   aif open "<descrição>"   pergunta o orquestrador e cria branch + worktree
+#   aif open "<descrição>"   pergunta orquestrador e worker, cria branch + worktree
 #   aif cd                   imprime o caminho da worktree (use: cd "$(aif cd)")
 #   aif status               o semáforo: onde estamos e qual o próximo passo
 #   aif verify               valida .ai/review.json sem commitar
@@ -25,6 +26,9 @@
 #   AIF_WORKTREE_DIR   (padrão: ../.ai-flow-worktrees)
 #   AIF_COMMIT_PREFIX  (padrão: feat)
 #   AIF_ORCHESTRATOR   (padrão da seleção: claude, codex ou opencode)
+#   AIF_WORKER         (padrão da seleção: reasonix ou claude)
+#   AIF_WORKER_MODEL   (modelo do worker Claude Code; padrão: sonnet)
+#   AIF_WORKER_EFFORT  (esforço do worker Claude Code; padrão: medium)
 
 set -euo pipefail
 
@@ -33,7 +37,7 @@ set -euo pipefail
 # Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
 # MINOR acrescenta comando ou campo, PATCH corrige comportamento.
 # O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
-AIF_VERSION="1.3.0"
+AIF_VERSION="1.4.0"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
@@ -100,6 +104,53 @@ choose_orchestrator() {
   printf '%s✓%s orquestrador desta tarefa: %s\n\n' "$grn" "$rst" "$ORCH_NAME"
 }
 
+# O worker segue o mesmo desenho do orquestrador (ADR-0007). O Claude Code roda
+# numa sessão própria, com as travas de .claude/aif-worker.json carregadas só
+# nela: no settings.json do projeto, o deny de .ai/review.json bloquearia
+# também o /revisar de um orquestrador Claude Code na mesma worktree. O
+# REASONIX.md, que o Reasonix lê sozinho, chega ao Claude pelo system prompt.
+set_worker() {
+  case "$1" in
+    reasonix)
+      WORKER_NAME="Reasonix"; WORKER_LABEL="Reasonix, em modo Normal"
+      WORKER_CMD=""
+      ;;
+    claude)
+      WORKER_NAME="Claude Code"; WORKER_LABEL="worker Claude Code"
+      WORKER_CMD="claude --model ${AIF_WORKER_MODEL:-sonnet} --effort ${AIF_WORKER_EFFORT:-medium} --permission-mode acceptEdits --settings .claude/aif-worker.json --append-system-prompt-file REASONIX.md"
+      ;;
+    *) return 1 ;;
+  esac
+  WORKER="$1"
+}
+
+set_worker "${AIF_WORKER:-reasonix}" \
+  || die "AIF_WORKER inválido: ${AIF_WORKER:-}. Use reasonix ou claude."
+
+choose_worker() {
+  local default_num a
+  case "$WORKER" in
+    reasonix) default_num=1 ;;
+    claude) default_num=2 ;;
+  esac
+
+  printf '%sQual worker vai implementar?%s\n\n' "$bold" "$rst"
+  printf '  %s1%s  Reasonix + DeepSeek\n' "$bold" "$rst"
+  printf '  %s2%s  Claude Code + %s %s(esforço %s)%s\n\n' "$bold" "$rst" \
+    "${AIF_WORKER_MODEL:-sonnet}" "$dim" "${AIF_WORKER_EFFORT:-medium}" "$rst"
+  while :; do
+    printf 'escolha [%s]: ' "$default_num"
+    if ! IFS= read -r a; then a="$default_num"; fi
+    [ -n "$a" ] || a="$default_num"
+    case "$a" in
+      1|reasonix|Reasonix) set_worker reasonix; break ;;
+      2|claude|"Claude Code"|"claude code") set_worker claude; break ;;
+      *) printf '%sopção inválida; use 1 ou 2.%s\n' "$red" "$rst" ;;
+    esac
+  done
+  printf '%s✓%s worker desta tarefa: %s\n\n' "$grn" "$rst" "$WORKER_NAME"
+}
+
 # Sempre a worktree principal, mesmo quando chamado de dentro de uma worktree de
 # tarefa: --show-toplevel devolveria a worktree, e o estado (.aif/) mora só no
 # repositório principal. A primeira linha de `worktree list` é sempre a main.
@@ -154,6 +205,10 @@ read_state() {
     set_orchestrator "$saved_orchestrator" \
       || die "orquestrador inválido no estado da tarefa: $saved_orchestrator"
   fi
+  # Tarefas abertas antes da escolha do worker usavam sempre o Reasonix.
+  local saved_worker
+  saved_worker="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("worker") or "reasonix")' "$f")"
+  set_worker "$saved_worker" || die "worker inválido no estado da tarefa: $saved_worker"
   [ -n "$BASE" ] || BASE="$(base_branch)"
   [ -d "$WORKTREE" ] || die "a worktree sumiu: $WORKTREE"
 }
@@ -229,9 +284,9 @@ PY
 
 has_code_changes() {
   local n
-  n="$(git -C "$WORKTREE" status --porcelain -- . ':(exclude).ai' ':(exclude).reasonix' ':(exclude)reasonix.toml' | wc -l)"
+  n="$(git -C "$WORKTREE" status --porcelain -- . ':(exclude).ai' ':(exclude).reasonix' ':(exclude)reasonix.toml' ':(exclude).claude/settings.local.json' | wc -l)"
   local c
-  c="$(git -C "$WORKTREE" diff --name-only "$(base_branch)...HEAD" -- . ':(exclude).ai' ':(exclude).reasonix' ':(exclude)reasonix.toml' 2>/dev/null | wc -l || echo 0)"
+  c="$(git -C "$WORKTREE" diff --name-only "$(base_branch)...HEAD" -- . ':(exclude).ai' ':(exclude).reasonix' ':(exclude)reasonix.toml' ':(exclude).claude/settings.local.json' 2>/dev/null | wc -l || echo 0)"
   [ "$n" -gt 0 ] || [ "$c" -gt 0 ]
 }
 
@@ -269,7 +324,8 @@ cmd_install() {
   src="$(cd "$src" && pwd)"
   local f
   for f in .claude/commands/planejar.md .claude/commands/revisar.md \
-           .claude/settings.json .ai/implementer.md REASONIX.md reasonix.toml \
+           .claude/settings.json .claude/aif-worker.json \
+           .ai/implementer.md REASONIX.md reasonix.toml \
            .agents/skills/planejar/SKILL.md \
            .agents/skills/revisar/SKILL.md \
            .codex/config.toml .codex/hooks.json .codex/hooks/aif-notify.sh \
@@ -346,6 +402,7 @@ cmd_install() {
 
   copy_keep .claude/commands/planejar.md .claude/commands/planejar.md
   copy_keep .claude/commands/revisar.md  .claude/commands/revisar.md
+  copy_keep .claude/aif-worker.json      .claude/aif-worker.json
   copy_keep .agents/skills/planejar/SKILL.md .agents/skills/planejar/SKILL.md
   copy_keep .agents/skills/revisar/SKILL.md  .agents/skills/revisar/SKILL.md
   copy_keep .codex/hooks/aif-notify.sh .codex/hooks/aif-notify.sh
@@ -407,7 +464,11 @@ cmd_install() {
   fi
   printf '  %sAs pastas de cada orquestrador são inertes para os outros dois.%s\n' \
     "$dim" "$rst"
-  printf '  %sO aif open perguntará qual deles usar em cada nova tarefa.%s\n\n' "$dim" "$rst"
+  printf '  %sO aif open perguntará qual deles usar em cada nova tarefa, e também o%s\n' \
+    "$dim" "$rst"
+  printf '  %sworker: Reasonix ou Claude Code. Para o Claude Code, ele imprime o comando%s\n' \
+    "$dim" "$rst"
+  printf '  %sque carrega as travas de .claude/aif-worker.json.%s\n\n' "$dim" "$rst"
 }
 
 # O reasonix.toml é estado local, como o .reasonix/: o Reasonix grava nele cada
@@ -556,7 +617,7 @@ warn_ignored_package() {
   git -C "$dest" rev-parse --show-toplevel >/dev/null 2>&1 || return 0
   local p hits=""
   for p in REASONIX.md .ai/implementer.md \
-           .claude/commands/planejar.md .claude/commands/revisar.md \
+           .claude/commands/planejar.md .claude/commands/revisar.md .claude/aif-worker.json \
            .agents/skills/planejar/SKILL.md .agents/skills/revisar/SKILL.md \
            .codex/config.toml .codex/hooks.json .codex/hooks/aif-notify.sh \
            .opencode/commands/planejar.md .opencode/commands/revisar.md \
@@ -869,7 +930,7 @@ PY
 # sem commit.
 warn_uncommitted_package() {
   local root="$1" base="$2" p faltando=""
-  for p in .claude/commands .agents/skills .codex .opencode REASONIX.md; do
+  for p in .claude/commands .claude/aif-worker.json .agents/skills .codex .opencode REASONIX.md; do
     [ -e "$root/$p" ] || continue
     if [ -z "$(git -C "$root" ls-tree -r --name-only "$base" -- "$p" 2>/dev/null)" ]; then
       faltando="$faltando
@@ -893,7 +954,7 @@ warn_uncommitted_package() {
 }
 
 cmd_open() {
-  local requested_orchestrator="" desc=""
+  local requested_orchestrator="" requested_worker="" desc=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --orchestrator)
@@ -902,11 +963,17 @@ cmd_open() {
         shift 2
         ;;
       --orchestrator=*) requested_orchestrator="${1#*=}"; shift ;;
+      --worker)
+        requested_worker="${2:-}"
+        [ -n "$requested_worker" ] || die "--worker exige reasonix ou claude"
+        shift 2
+        ;;
+      --worker=*) requested_worker="${1#*=}"; shift ;;
       -*) die "opção desconhecida: $1" ;;
       *) [ -z "$desc" ] || die "a descrição deve ser um único argumento entre aspas"; desc="$1"; shift ;;
     esac
   done
-  [ -n "$desc" ] || die "uso: aif open [--orchestrator <nome>] \"<descrição da tarefa>\""
+  [ -n "$desc" ] || die "uso: aif open [--orchestrator <nome>] [--worker <nome>] \"<descrição da tarefa>\""
   local root; root="$(repo_root)"
   git -C "$root" rev-parse HEAD >/dev/null 2>&1 \
     || die "o repositório não tem commits ainda; faça o commit inicial primeiro"
@@ -922,6 +989,13 @@ cmd_open() {
     printf '\n%s✓%s orquestrador desta tarefa: %s\n\n' "$grn" "$rst" "$ORCH_NAME"
   else
     choose_orchestrator
+  fi
+  if [ -n "$requested_worker" ]; then
+    set_worker "$requested_worker" \
+      || die "worker inválido: $requested_worker. Use reasonix ou claude."
+    printf '%s✓%s worker desta tarefa: %s\n\n' "$grn" "$rst" "$WORKER_NAME"
+  else
+    choose_worker
   fi
   local slug branch base wt
   slug="$(make_slug "$desc")"
@@ -950,25 +1024,43 @@ cmd_open() {
 
   mkdir -p "$root/.aif"
   local ign
-  for ign in ".aif/" ".ai/current-task.md" ".ai/review.json" ".reasonix/" "reasonix.toml"; do
+  # O .claude/settings.local.json é onde o Claude Code grava cada "sempre
+  # permitir" — do worker e do orquestrador — dentro da worktree.
+  for ign in ".aif/" ".ai/current-task.md" ".ai/review.json" ".reasonix/" "reasonix.toml" \
+             ".claude/settings.local.json"; do
     grep -qsxF "$ign" "$root/.gitignore" 2>/dev/null || echo "$ign" >> "$root/.gitignore"
   done
-  python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" "$ORCHESTRATOR" <<'PY'
+  python3 - "$(state_file)" "$slug" "$branch" "$wt" "$desc" "$base" "$ORCHESTRATOR" "$WORKER" <<'PY'
 import json, sys
-f, slug, branch, wt, desc, base, orchestrator = sys.argv[1:8]
+f, slug, branch, wt, desc, base, orchestrator, worker = sys.argv[1:9]
 json.dump({"slug": slug, "branch": branch, "worktree": wt,
            "description": desc, "base_branch": base,
-           "orchestrator": orchestrator},
+           "orchestrator": orchestrator, "worker": worker},
           open(f, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
   printf '%s✓ tarefa aberta%s\n' "$grn" "$rst"
   printf '  branch    %s (base: %s)\n' "$branch" "$base"
   printf '  orquestrador  %s\n' "$ORCH_NAME"
+  printf '  worker    %s\n' "$WORKER_NAME"
   printf '  worktree  %s\n\n' "$wt"
   printf '%sPróximo passo:%s abra os dois agentes na worktree e planeje.\n\n' "$bold" "$rst"
   printf '    cd "%s"\n' "$wt"
   printf '    %s\n' "$ORCH_CMD"
-  printf '    %s%s %s%s\n' "$dim" "$ORCH_PLAN" "$desc" "$rst"
+  printf '    %s%s %s%s\n\n' "$dim" "$ORCH_PLAN" "$desc" "$rst"
+  print_worker_launch "$wt"
+}
+
+# Como abrir o worker desta tarefa. O Reasonix é uma GUI; o Claude Code precisa
+# do comando inteiro, porque é ele que carrega as travas e o contrato.
+print_worker_launch() {
+  printf '  %sworker, em outro terminal:%s\n' "$dim" "$rst"
+  if [ -n "$WORKER_CMD" ]; then
+    printf '    cd "%s"\n' "$1"
+    printf '    %s\n\n' "$WORKER_CMD"
+  else
+    printf '    %sabra o Reasonix na worktree, em modo Normal e com Workspace access%s\n\n' \
+      "$dim" "$rst"
+  fi
 }
 
 cmd_cd() { read_state; printf '%s\n' "$WORKTREE"; }
@@ -978,8 +1070,8 @@ cmd_status() {
   local p r
   p="$(plan_state)"; r="$(review_state)"
   printf '\n%s%s%s  %s\n' "$bold" "$SLUG" "$rst" "$DESCRIPTION"
-  printf '%sbranch %s · orquestrador %s · worktree %s%s\n\n' \
-    "$dim" "$BRANCH" "$ORCH_NAME" "$WORKTREE" "$rst"
+  printf '%sbranch %s · orquestrador %s · worker %s · worktree %s%s\n\n' \
+    "$dim" "$BRANCH" "$ORCH_NAME" "$WORKER_NAME" "$WORKTREE" "$rst"
 
   if [ -n "$ACCEPTED" ]; then
     printf '  aceita       %s✓ commitada em %s%s\n' "$grn" "$ACCEPTED" "$rst"
@@ -1012,15 +1104,16 @@ cmd_status() {
     printf 'no %s%s%s, dentro da worktree: %s%s %s%s\n\n' \
       "$cyn" "$ORCH_NAME" "$rst" "$bold" "$ORCH_PLAN" "$DESCRIPTION" "$rst"
   elif ! has_code_changes; then
-    printf 'no %sReasonix%s, em modo Normal: cole o bloco que o %s imprimiu.\n\n' \
-      "$cyn" "$rst" "$ORCH_NAME"
+    printf 'no %s%s%s: cole o bloco que o %s imprimiu.\n\n' \
+      "$cyn" "$WORKER_LABEL" "$rst" "$ORCH_NAME"
+    print_worker_launch "$WORKTREE"
   elif [ "$r" = "missing" ]; then
     printf 'no %s%s%s: %s%s%s\n\n' "$cyn" "$ORCH_NAME" "$rst" "$bold" "$ORCH_REVIEW" "$rst"
   else
     case "$r" in
       approved:*) printf 'rode %saif accept%s para commitar.\n\n' "$bold" "$rst" ;;
-      changes:*)  printf 'no %sReasonix%s, em modo Normal: cole o bloco de correção que o %s imprimiu.\n\n' \
-                    "$cyn" "$rst" "$ORCH_NAME" ;;
+      changes:*)  printf 'no %s%s%s: cole o bloco de correção que o %s imprimiu.\n\n' \
+                    "$cyn" "$WORKER_LABEL" "$rst" "$ORCH_NAME" ;;
       *)          printf 'o %s.ai/review.json%s está inválido; peça ao %s para reescrevê-lo.\n\n' \
                     "$bold" "$rst" "$ORCH_NAME" ;;
     esac
@@ -1049,13 +1142,15 @@ cmd_accept() {
   # local do app do worker (títulos de tópico, timestamps): não pertence ao
   # histórico do projeto, e o worker o escreve dentro da worktree. O
   # reasonix.toml também: o 'open' o copia para cá e o Reasonix grava nele cada
-  # "Always allow", com caminho absoluto.
+  # "Always allow", com caminho absoluto. O .claude/settings.local.json é o
+  # equivalente do Claude Code, worker ou orquestrador.
   # Nada de ':(exclude)' aqui: um pathspec de exclusão faz o git tratar esses
   # caminhos como nomeados à mão e recusar o add inteiro quando eles estão no
   # .gitignore — que é justamente onde 'aif open' os põe. Adiciona tudo e
-  # tira os quatro do índice depois, o que vale nos dois casos.
+  # tira esses do índice depois, o que vale nos dois casos.
   git -C "$WORKTREE" add -A -- .
-  git -C "$WORKTREE" reset -q -- .ai/current-task.md .ai/review.json .reasonix reasonix.toml
+  git -C "$WORKTREE" reset -q -- .ai/current-task.md .ai/review.json .reasonix reasonix.toml \
+    .claude/settings.local.json
   git -C "$WORKTREE" commit -q -m "$COMMIT_PREFIX: $DESCRIPTION"
   local sha; sha="$(git -C "$WORKTREE" rev-parse --short HEAD)"
   mark_accepted "$sha"

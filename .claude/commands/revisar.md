@@ -85,12 +85,12 @@ ficam em inglês; `summary`, `description` e `recommendation` em português.
 ### Se reprovou
 
 Imprima — e nada além disso — a linha de status e o bloco de código abaixo. O
-usuário copia o bloco inteiro para o Reasonix: sem `/goal`, sem linhas de
+usuário copia o bloco inteiro para o worker: sem `/goal`, sem linhas de
 moldura. As regras permanentes do worker já chegam a ele pelo `REASONIX.md`;
 não as repita.
 
 ````
-REPROVADO (<n> bloqueantes) → mande o worker corrigir. Cole no Reasonix, em modo Normal:
+REPROVADO (<n> bloqueantes) → mande o worker corrigir. Cole na sessão do worker:
 
 ```text
 Corrija todas as questões CRITICAL, HIGH e MEDIUM de .ai/review.json.

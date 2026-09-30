@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git commit)",
+      "Bash(git commit *)",
+      "Bash(git * commit)",
+      "Bash(git * commit *)",
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(git * push)",
+      "Bash(git * push *)",
+      "Bash(git merge)",
+      "Bash(git merge *)",
+      "Bash(git * merge)",
+      "Bash(git * merge *)",
+      "Bash(git rebase)",
+      "Bash(git rebase *)",
+      "Bash(git * rebase)",
+      "Bash(git * rebase *)",
+      "Bash(git reset)",
+      "Bash(git reset *)",
+      "Bash(git * reset)",
+      "Bash(git * reset *)",
+      "Bash(aif)",
+      "Bash(aif *)",
+      "Edit(.ai/review.json)",
+      "Skill(planejar)",
+      "Skill(revisar)"
+    ]
+  }
+}

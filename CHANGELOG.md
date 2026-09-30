@@ -16,6 +16,34 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.4.0 — 2026-09-30
+
+- `aif open` pergunta também o worker: **Reasonix + DeepSeek** (padrão) ou
+  **Claude Code + Sonnet**. A escolha fica no campo `worker` de
+  `.aif/current.json`, e tarefas antigas sem ele são lidas como Reasonix.
+  `--worker reasonix|claude` pula a pergunta, e `AIF_WORKER` muda o padrão do
+  menu. Ver ADR-0007.
+- Para o worker Claude Code, `open` e `status` imprimem o comando que abre a
+  sessão dele na worktree: modelo e esforço de `AIF_WORKER_MODEL` e
+  `AIF_WORKER_EFFORT` (padrão `sonnet` e `medium`), permissão `acceptEdits`,
+  `REASONIX.md` no system prompt e as travas de `.claude/aif-worker.json`.
+- Novo `.claude/aif-worker.json`, instalado pelo `aif install`: regras
+  `permissions.deny` para `git commit`, `push`, `merge`, `rebase` e `reset` —
+  inclusive com opções antes do subcomando, como `git -c … commit` —,
+  qualquer `aif`, escrita em `.ai/review.json` e as skills `planejar` e
+  `revisar`. Fica fora do `settings.json` para não travar o `/revisar` de um
+  orquestrador Claude Code na mesma worktree.
+- `aif accept` não commita, e `aif status` não conta como mudança de código, o
+  `.claude/settings.local.json` que o Claude Code grava na worktree a cada
+  "sempre permitir". O `aif open` o põe no `.gitignore`.
+- O handoff do `/planejar` e do `/revisar` diz "cole na sessão do worker" em
+  vez de "cole no Reasonix", nos três orquestradores.
+- Para atualizar um projeto, rode `aif install` de novo. O
+  `.claude/aif-worker.json` chega sem `--force`. Os prompts novos exigem
+  `--force`, que também troca o `REASONIX.md`: reaplique o comando de testes a
+  partir do `.bak`. Depois commite, porque a worktree só enxerga o que está
+  commitado.
+
 ## 1.3.0 — 2026-09-27
 
 - O handoff para o Reasonix deixa de usar `/goal`. No Reasonix, Goal não tem
