@@ -9,7 +9,7 @@ o sistema como ele é hoje; os ADRs explicam por que ele chegou a esse desenho.
 - Status: `Proposed`, `Accepted`, `Deprecated` ou `Superseded`.
 - ADRs aceitos não são reescritos para parecer atuais. Uma decisão nova cria
   outro ADR e aponta qual registro substitui.
-- O número seguinte é `0008`.
+- O número seguinte é `0009`.
 
 Cada ADR contém contexto, decisão, consequências e relações com outros
 registros. Um registro novo deve usar esta estrutura mínima:
@@ -36,3 +36,4 @@ registros. Um registro novo deve usar esta estrutura mínima:
 - [ADR-0005 — Escolher o orquestrador por tarefa](0005-escolher-orquestrador-por-tarefa.md)
 - [ADR-0006 — Rodar o worker em modo Normal com contrato enxuto](0006-worker-em-modo-normal-com-contrato-enxuto.md)
 - [ADR-0007 — Escolher o worker por tarefa](0007-escolher-worker-por-tarefa.md)
+- [ADR-0008 — Barrar opções do Git antes do subcomando no deny do Reasonix](0008-barrar-opcoes-do-git-no-deny-do-reasonix.md)
