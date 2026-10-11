@@ -85,8 +85,8 @@ commitam:
 - **Reasonix + DeepSeek** (padrão): em modo Normal. O `reasonix.toml` local,
   que o `aif open` copia para a worktree, barra commit, push, merge e `aif`
   com regras `deny`.
-- **Claude Code + Sonnet**: numa segunda sessão do Claude, aberta com o
-  comando que o `aif` imprime. As mesmas regras `deny` vêm de
+- **Claude Code + Haiku**: numa segunda sessão do Claude, com Haiku 5.5 em
+  esforço médio, aberta com o comando que o `aif` imprime. As mesmas regras `deny` vêm de
   `.claude/aif-worker.json`, carregado só nessa sessão.
 
 Nos dois, as regras valem em qualquer modo de permissão. O worker Claude não

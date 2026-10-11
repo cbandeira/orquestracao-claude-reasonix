@@ -1,6 +1,7 @@
 # ADR-0007 — Escolher o worker por tarefa
 
-- Status: Accepted
+- Status: Accepted (modelo e esforço do worker Claude substituídos pelo
+  [ADR-0009](0009-worker-claude-com-haiku.md))
 - Data: 2026-09-30
 
 ## Contexto
