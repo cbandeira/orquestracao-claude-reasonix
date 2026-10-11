@@ -8,7 +8,7 @@
 #
 # O orquestrador (quem planeja e revisa) pode ser Claude Code, Codex ou
 # OpenCode. Os três leem o mesmo prompt canônico. O worker (quem implementa)
-# pode ser Reasonix + DeepSeek ou Claude Code + Sonnet. As duas escolhas são
+# pode ser Reasonix + DeepSeek ou Claude Code + Haiku. As duas escolhas são
 # feitas no open e guardadas só no estado da tarefa.
 #
 #   aif install <projeto>    copia o pacote para um projeto (--force atualiza)
@@ -27,7 +27,7 @@
 #   AIF_COMMIT_PREFIX  (padrão: feat)
 #   AIF_ORCHESTRATOR   (padrão da seleção: claude, codex ou opencode)
 #   AIF_WORKER         (padrão da seleção: reasonix ou claude)
-#   AIF_WORKER_MODEL   (modelo do worker Claude Code; padrão: sonnet)
+#   AIF_WORKER_MODEL   (modelo do worker Claude Code; padrão: claude-haiku-5-5)
 #   AIF_WORKER_EFFORT  (esforço do worker Claude Code; padrão: medium)
 
 set -euo pipefail
@@ -37,7 +37,7 @@ set -euo pipefail
 # Semântica: MAJOR quebra o fluxo ou o formato dos artefatos em .ai/,
 # MINOR acrescenta comando ou campo, PATCH corrige comportamento.
 # O histórico legível fica no CHANGELOG.md, ao lado deste arquivo.
-AIF_VERSION="1.4.1"
+AIF_VERSION="1.5.0"
 
 BRANCH_PREFIX="${AIF_BRANCH_PREFIX:-ai}"
 WORKTREE_DIR="${AIF_WORKTREE_DIR:-../.ai-flow-worktrees}"
@@ -109,6 +109,10 @@ choose_orchestrator() {
 # nela: no settings.json do projeto, o deny de .ai/review.json bloquearia
 # também o /revisar de um orquestrador Claude Code na mesma worktree. O
 # REASONIX.md, que o Reasonix lê sozinho, chega ao Claude pelo system prompt.
+# O esforço vai pela variável e não por --effort porque, no Claude Code,
+# CLAUDE_CODE_EFFORT_LEVEL exportada no shell vence a flag (ADR-0009). O modelo
+# usa o ID completo: num Claude Code antigo, o alias haiku abre o Haiku 4.5,
+# que ignora o esforço.
 set_worker() {
   case "$1" in
     reasonix)
@@ -117,7 +121,7 @@ set_worker() {
       ;;
     claude)
       WORKER_NAME="Claude Code"; WORKER_LABEL="worker Claude Code"
-      WORKER_CMD="claude --model ${AIF_WORKER_MODEL:-sonnet} --effort ${AIF_WORKER_EFFORT:-medium} --permission-mode acceptEdits --settings .claude/aif-worker.json --append-system-prompt-file REASONIX.md"
+      WORKER_CMD="CLAUDE_CODE_EFFORT_LEVEL=${AIF_WORKER_EFFORT:-medium} claude --model ${AIF_WORKER_MODEL:-claude-haiku-5-5} --permission-mode acceptEdits --settings .claude/aif-worker.json --append-system-prompt-file REASONIX.md"
       ;;
     *) return 1 ;;
   esac
@@ -137,7 +141,7 @@ choose_worker() {
   printf '%sQual worker vai implementar?%s\n\n' "$bold" "$rst"
   printf '  %s1%s  Reasonix + DeepSeek\n' "$bold" "$rst"
   printf '  %s2%s  Claude Code + %s %s(esforço %s)%s\n\n' "$bold" "$rst" \
-    "${AIF_WORKER_MODEL:-sonnet}" "$dim" "${AIF_WORKER_EFFORT:-medium}" "$rst"
+    "${AIF_WORKER_MODEL:-claude-haiku-5-5}" "$dim" "${AIF_WORKER_EFFORT:-medium}" "$rst"
   while :; do
     printf 'escolha [%s]: ' "$default_num"
     if ! IFS= read -r a; then a="$default_num"; fi

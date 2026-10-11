@@ -98,8 +98,10 @@ substituí-lo.
 #### Claude Code
 
 Uma sessão do Claude Code separada da do orquestrador, aberta na worktree com o
-comando que o `aif` imprime: modelo e esforço de `AIF_WORKER_MODEL` e
-`AIF_WORKER_EFFORT` (padrão `sonnet` e `medium`), permissão `acceptEdits`,
+comando que o `aif` imprime: modelo de `AIF_WORKER_MODEL` (padrão
+`claude-haiku-5-5`, sempre pelo ID completo) e esforço de `AIF_WORKER_EFFORT`
+(padrão `medium`), passado por `CLAUDE_CODE_EFFORT_LEVEL` no próprio comando
+para que uma variável do shell não o sobrescreva, permissão `acceptEdits`,
 `REASONIX.md` no system prompt por `--append-system-prompt-file` e as travas
 de `.claude/aif-worker.json` por `--settings`. Esse arquivo é do pacote e fica
 no git. Ele não se mistura ao `.claude/settings.json` porque o deny de escrita

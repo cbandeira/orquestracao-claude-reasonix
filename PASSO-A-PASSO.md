@@ -11,7 +11,7 @@ as justificativas históricas das decisões, consulte `docs/adr/`.
 São três papéis e dois agentes. O **orquestrador** planeja e revisa; o
 **worker** implementa; você commita e integra. O orquestrador pode ser Claude
 Code, Codex ou OpenCode — os três seguem o mesmo protocolo. O worker pode ser o
-Reasonix, com DeepSeek, ou uma segunda sessão do Claude Code, com Sonnet.
+Reasonix, com DeepSeek, ou uma segunda sessão do Claude Code, com Haiku.
 
 ---
 
@@ -244,7 +244,7 @@ Logo depois vem a pergunta do worker:
 Qual worker vai implementar?
 
   1  Reasonix + DeepSeek
-  2  Claude Code + sonnet (esforço medium)
+  2  Claude Code + claude-haiku-5-5 (esforço medium)
 ```
 
 O padrão é o Reasonix. Os dois cumprem o mesmo contrato, e a diferença é de
@@ -256,7 +256,7 @@ mais erro de um autor de outra família de modelo. Use o Claude quando tiver
 folga de cota e o Reasonix nas tarefas longas. `AIF_WORKER` muda o padrão do
 menu, `--worker claude` pula a pergunta, e `AIF_WORKER_MODEL` e
 `AIF_WORKER_EFFORT` trocam o modelo e o esforço do worker Claude (padrão
-`sonnet` e `medium`). Ver ADR-0007.
+`claude-haiku-5-5` e `medium`). Ver ADR-0007 e ADR-0009.
 
 Diferenças reais entre os orquestradores, para você escolher com os olhos abertos:
 
@@ -372,12 +372,21 @@ Num terminal separado, dentro da worktree, abra o worker com o comando que o
 do worker:
 
 ```bash
-claude --model sonnet --effort medium --permission-mode acceptEdits \
-  --settings .claude/aif-worker.json --append-system-prompt-file REASONIX.md
+CLAUDE_CODE_EFFORT_LEVEL=medium claude --model claude-haiku-5-5 \
+  --permission-mode acceptEdits --settings .claude/aif-worker.json \
+  --append-system-prompt-file REASONIX.md
 ```
 
 Cada parte tem motivo:
 
+- `CLAUDE_CODE_EFFORT_LEVEL=medium` fixa o esforço só nesta sessão. Não é
+  `--effort` porque essa variável, se estiver exportada no seu shell, passa
+  por cima da flag.
+- `--model claude-haiku-5-5` usa o ID completo. Num Claude Code antigo, o
+  alias `haiku` abre o Haiku 4.5, que não tem esforço e ignora o `medium` sem
+  avisar. Mantenha o `claude` atualizado (`claude update`): uma versão que
+  ainda não conhece o Haiku 5.5 avisa `unrecognized_model`, mas usa o modelo
+  e o esforço certos.
 - `--append-system-prompt-file REASONIX.md` entrega ao Claude o mesmo contrato
   que o Reasonix lê sozinho, e ele manda ler `.ai/implementer.md`.
 - `--settings .claude/aif-worker.json` carrega as travas só nesta sessão:
@@ -576,7 +585,7 @@ Variáveis de ambiente: `AIF_BRANCH_PREFIX` (padrão `ai`), `AIF_WORKTREE_DIR`
 (padrão `../.ai-flow-worktrees`), `AIF_COMMIT_PREFIX` (padrão `feat`) e
 `AIF_ORCHESTRATOR` (padrão inicial `claude`; aceita `codex` e `opencode`),
 `AIF_WORKER` (padrão inicial `reasonix`; aceita `claude`), `AIF_WORKER_MODEL`
-(padrão `sonnet`) e `AIF_WORKER_EFFORT` (padrão `medium`). O orquestrador e o
+(padrão `claude-haiku-5-5`) e `AIF_WORKER_EFFORT` (padrão `medium`). O orquestrador e o
 worker efetivos são escolhidos e salvos por `aif open`.
 
 Enquanto houver uma tarefa aceita e não integrada, o `aif open` recusa abrir

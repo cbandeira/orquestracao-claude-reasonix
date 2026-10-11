@@ -16,6 +16,21 @@ Semântica:
   existe. Reinstalar é opcional.
 - **PATCH** — corrige comportamento, mensagem ou portabilidade.
 
+## 1.5.0 — 2026-10-10
+
+- O worker Claude Code passa a usar **Haiku 5.5 com esforço médio**, no lugar
+  de Sonnet. O menu do `aif open` mostra `Claude Code + claude-haiku-5-5
+  (esforço medium)`. `AIF_WORKER_MODEL` e `AIF_WORKER_EFFORT` continuam
+  sobrescrevendo os dois; com `AIF_WORKER_MODEL=sonnet` volta o comportamento
+  anterior. Ver ADR-0009.
+- O comando impresso por `open` e `status` passa o esforço por
+  `CLAUDE_CODE_EFFORT_LEVEL=medium` em vez de `--effort medium`: a variável,
+  se exportada no shell, vencia a flag. O modelo vai pelo ID completo
+  `claude-haiku-5-5`, porque num Claude Code antigo o alias `haiku` abre o
+  Haiku 4.5, que ignora o esforço.
+- Tarefas já abertas com o worker Claude guardam só `worker: claude`; o
+  `aif status` delas passa a imprimir o comando novo.
+
 ## 1.4.1 — 2026-09-30
 
 - O `deny` do `reasonix.toml` deixava passar opções do Git antes do
